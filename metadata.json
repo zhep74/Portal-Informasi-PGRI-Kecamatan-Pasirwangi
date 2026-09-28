@@ -1,0 +1,6 @@
+{
+  "name": "PGRI Kecamatan Pasirwangi | Portal Informasi Digital",
+  "description": "Portal Informasi Digital PGRI Cabang Kecamatan Pasirwangi berisi profil organisasi, kepengurusan, program kerja, kegiatan, berita, layanan anggota, pendaftaran PGRI, dan informasi organisasi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
