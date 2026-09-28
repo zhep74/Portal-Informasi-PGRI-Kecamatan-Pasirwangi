@@ -1,0 +1,121 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default Deny Catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.email == 'asepakon74@gmail.com' && request.auth.token.email_verified == true) ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // Global settings: profile, visiMisi, socialMedia, siteSettings
+    match /settings/{settingId} {
+      allow get, list: if isValidId(settingId);
+      allow create, update, delete: if isValidId(settingId) && isAdmin();
+    }
+
+    // Sejarah (Historical milestones)
+    match /sejarah/{sejarahId} {
+      allow get, list: if isValidId(sejarahId);
+      allow create, update, delete: if isValidId(sejarahId) && isAdmin();
+    }
+
+    // Pengurus (Committee members)
+    match /pengurus/{pengurusId} {
+      allow get, list: if isValidId(pengurusId);
+      allow create, update, delete: if isValidId(pengurusId) && isAdmin();
+    }
+
+    // Program Kerja (Work programs)
+    match /programKerja/{programKerjaId} {
+      allow get, list: if isValidId(programKerjaId);
+      allow create, update, delete: if isValidId(programKerjaId) && isAdmin();
+    }
+
+    // Kegiatan (Events and activities documentation)
+    match /kegiatan/{kegiatanId} {
+      allow get, list: if isValidId(kegiatanId);
+      allow create, update, delete: if isValidId(kegiatanId) && isAdmin();
+    }
+
+    // Berita (News and announcements)
+    match /berita/{beritaId} {
+      allow get, list: if isValidId(beritaId);
+      allow create, update, delete: if isValidId(beritaId) && isAdmin();
+    }
+
+    // Prestasi (Achievements and awards)
+    match /prestasi/{prestasiId} {
+      allow get, list: if isValidId(prestasiId);
+      allow create, update, delete: if isValidId(prestasiId) && isAdmin();
+    }
+
+    // Galeri (Photos and videos media)
+    match /galeri/{galeriId} {
+      allow get, list: if isValidId(galeriId);
+      allow create, update, delete: if isValidId(galeriId) && isAdmin();
+    }
+
+    // Kalender (Agenda & Events)
+    match /kalender/{kalenderId} {
+      allow get, list: if isValidId(kalenderId);
+      allow create, update, delete: if isValidId(kalenderId) && isAdmin();
+    }
+
+    // Layanan (Service catalog)
+    match /layanan/{layananId} {
+      allow get, list: if isValidId(layananId);
+      allow create, update, delete: if isValidId(layananId) && isAdmin();
+    }
+
+    // Pendaftaran (Member registration with PII isolation)
+    match /pendaftaran/{pendaftaranId} {
+      // Public applicants can submit registration applications
+      allow create: if isValidId(pendaftaranId) &&
+        incoming().id is string && incoming().id.size() <= 128 &&
+        incoming().namaLengkap is string && incoming().namaLengkap.size() <= 200 &&
+        incoming().noWhatsApp is string && incoming().noWhatsApp.size() <= 50;
+      
+      // Strict PII protection: Only administrators can read, inspect, or manage applications
+      allow get, list, update, delete: if isValidId(pendaftaranId) && isAdmin();
+    }
+
+    // Aspirasi (Public/teacher feedback submissions with PII isolation)
+    match /aspirasi/{aspirasiId} {
+      // Public can submit feedback
+      allow create: if isValidId(aspirasiId) &&
+        incoming().id is string && incoming().id.size() <= 128 &&
+        incoming().judul is string && incoming().judul.size() <= 300 &&
+        incoming().isi is string && incoming().isi.size() <= 5000;
+
+      // Strict PII protection: Only administrators can read, update status, or respond
+      allow get, list, update, delete: if isValidId(aspirasiId) && isAdmin();
+    }
+
+    // Admins metadata collection
+    match /admins/{adminId} {
+      allow get, list: if isSignedIn() && (request.auth.uid == adminId || isAdmin());
+      allow create, update, delete: if isAdmin();
+    }
+  }
+}

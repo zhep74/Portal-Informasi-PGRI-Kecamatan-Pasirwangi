@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import {
   OrgProfile,
   SejarahItem,
@@ -35,6 +35,22 @@ import {
   initialSocialMedia,
   initialSiteSettings,
 } from './initialData';
+import {
+  auth,
+  db,
+  googleAuthProvider,
+  handleFirestoreError,
+  OperationType,
+} from './firebase';
+import { onAuthStateChanged, signInWithPopup, signOut, User } from 'firebase/auth';
+import {
+  collection,
+  doc,
+  onSnapshot,
+  setDoc,
+  deleteDoc,
+  writeBatch,
+} from 'firebase/firestore';
 
 export interface ToastMessage {
   id: string;
@@ -59,13 +75,20 @@ interface PgriContextType {
   socialMedia: SocialMediaLinks;
   siteSettings: SiteSettings;
   isAdminLoggedIn: boolean;
+  adminUser: User | null;
+  isCloudConnected: boolean;
+  isSyncingCloud: boolean;
   toasts: ToastMessage[];
 
   // Admin Auth
   loginAdmin: (password: string) => boolean;
+  loginAdminWithGoogle: () => Promise<boolean>;
   logoutAdmin: () => void;
   showToast: (message: string, type?: 'success' | 'error' | 'info' | 'warning') => void;
   removeToast: (id: string) => void;
+
+  // Cloud Synchronization
+  syncAllToFirestore: () => Promise<void>;
 
   // Profile
   updateProfile: (profile: Partial<OrgProfile>) => void;
@@ -179,7 +202,11 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
   const [aspirasiList, setAspirasiList] = useState<AspirasiItem[]>(initialAspirasi);
   const [socialMedia, setSocialMedia] = useState<SocialMediaLinks>(initialSocialMedia);
   const [siteSettings, setSiteSettings] = useState<SiteSettings>(initialSiteSettings);
+
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(false);
+  const [adminUser, setAdminUser] = useState<User | null>(null);
+  const [isCloudConnected, setIsCloudConnected] = useState<boolean>(true);
+  const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [hydrated, setHydrated] = useState<boolean>(false);
 
@@ -188,14 +215,35 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
     setToasts((prev) => [...prev, { id, message, type }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
+    }, 4500);
   }, []);
 
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  // Hydrate from localStorage
+  // 1. Listen to Firebase Auth state
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setAdminUser(user);
+        setIsAdminLoggedIn(true);
+        try {
+          localStorage.setItem(AUTH_KEY, 'true');
+        } catch {}
+      } else {
+        setAdminUser(null);
+        const savedAuth = typeof window !== 'undefined' ? localStorage.getItem(AUTH_KEY) : null;
+        if (savedAuth !== 'true') {
+          setIsAdminLoggedIn(false);
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // 2. Hydrate from localStorage for instant initial paint
   useEffect(() => {
     const timer = setTimeout(() => {
       try {
@@ -221,19 +269,10 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
           if (parsed.pendaftaranList) setPendaftaranList(deduplicateItems(parsed.pendaftaranList, 'pend'));
           if (parsed.aspirasiList) setAspirasiList(deduplicateItems(parsed.aspirasiList, 'asp'));
           if (parsed.socialMedia) setSocialMedia(parsed.socialMedia);
-          if (parsed.siteSettings) {
-            setSiteSettings({
-              ...parsed.siteSettings,
-              visitorStats: {
-                ...parsed.siteSettings.visitorStats,
-                hariIni: (parsed.siteSettings.visitorStats?.hariIni || 148) + 1,
-                total: (parsed.siteSettings.visitorStats?.total || 31250) + 1,
-              },
-            });
-          }
+          if (parsed.siteSettings) setSiteSettings(parsed.siteSettings);
         }
       } catch (e) {
-        console.error('Error hydrating PGRI store from localStorage:', e);
+        console.error('Error reading localStorage:', e);
       } finally {
         setHydrated(true);
       }
@@ -242,16 +281,211 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
     return () => clearTimeout(timer);
   }, []);
 
-  // Dynamic Browser Favicon and Title synchronization
+  // 3. REALTIME CLOUD FIRESTORE SUBSCRIPTIONS
+  // Every user who opens the website connects to Firestore and gets instant updates
+  useEffect(() => {
+    // A. Settings (Profile, VisiMisi, SocialMedia, SiteSettings)
+    const unsubProfile = onSnapshot(
+      doc(db, 'settings', 'profile'),
+      (snapshot) => {
+        if (snapshot.exists()) {
+          setProfile((prev) => ({ ...prev, ...(snapshot.data() as OrgProfile) }));
+        }
+      },
+      (err) => {
+        console.warn('Firestore profile snapshot info:', err.message);
+      }
+    );
+
+    const unsubVisiMisi = onSnapshot(
+      doc(db, 'settings', 'visiMisi'),
+      (snapshot) => {
+        if (snapshot.exists()) {
+          setVisiMisi(snapshot.data() as VisiMisi);
+        }
+      },
+      (err) => console.warn('Firestore visiMisi snapshot info:', err.message)
+    );
+
+    const unsubSocial = onSnapshot(
+      doc(db, 'settings', 'socialMedia'),
+      (snapshot) => {
+        if (snapshot.exists()) {
+          setSocialMedia(snapshot.data() as SocialMediaLinks);
+        }
+      },
+      (err) => console.warn('Firestore socialMedia snapshot info:', err.message)
+    );
+
+    const unsubSite = onSnapshot(
+      doc(db, 'settings', 'siteSettings'),
+      (snapshot) => {
+        if (snapshot.exists()) {
+          setSiteSettings(snapshot.data() as SiteSettings);
+        }
+      },
+      (err) => console.warn('Firestore siteSettings snapshot info:', err.message)
+    );
+
+    // B. Collections
+    const unsubSejarah = onSnapshot(
+      collection(db, 'sejarah'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const items = snapshot.docs.map((d) => d.data() as SejarahItem);
+          setSejarahList(deduplicateItems(items, 'sej'));
+        }
+      },
+      (err) => console.warn('Firestore sejarah snapshot info:', err.message)
+    );
+
+    const unsubPengurus = onSnapshot(
+      collection(db, 'pengurus'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const items = snapshot.docs.map((d) => d.data() as PengurusItem);
+          // Sort by noUrut
+          items.sort((a, b) => (a.noUrut || 0) - (b.noUrut || 0));
+          setPengurusList(deduplicateItems(items, 'peng'));
+        }
+      },
+      (err) => console.warn('Firestore pengurus snapshot info:', err.message)
+    );
+
+    const unsubProgram = onSnapshot(
+      collection(db, 'programKerja'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const items = snapshot.docs.map((d) => d.data() as ProgramKerjaItem);
+          setProgramKerjaList(deduplicateItems(items, 'prog'));
+        }
+      },
+      (err) => console.warn('Firestore programKerja snapshot info:', err.message)
+    );
+
+    const unsubKegiatan = onSnapshot(
+      collection(db, 'kegiatan'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const items = snapshot.docs.map((d) => d.data() as KegiatanItem);
+          setKegiatanList(deduplicateItems(items, 'keg'));
+        }
+      },
+      (err) => console.warn('Firestore kegiatan snapshot info:', err.message)
+    );
+
+    const unsubBerita = onSnapshot(
+      collection(db, 'berita'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const items = snapshot.docs.map((d) => d.data() as BeritaItem);
+          setBeritaList(deduplicateItems(items, 'ber'));
+        }
+      },
+      (err) => console.warn('Firestore berita snapshot info:', err.message)
+    );
+
+    const unsubPrestasi = onSnapshot(
+      collection(db, 'prestasi'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const items = snapshot.docs.map((d) => d.data() as PrestasiItem);
+          setPrestasiList(deduplicateItems(items, 'pres'));
+        }
+      },
+      (err) => console.warn('Firestore prestasi snapshot info:', err.message)
+    );
+
+    const unsubGaleri = onSnapshot(
+      collection(db, 'galeri'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const items = snapshot.docs.map((d) => d.data() as GaleriItem);
+          setGaleriList(deduplicateItems(items, 'gal'));
+        }
+      },
+      (err) => console.warn('Firestore galeri snapshot info:', err.message)
+    );
+
+    const unsubKalender = onSnapshot(
+      collection(db, 'kalender'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const items = snapshot.docs.map((d) => d.data() as KalenderItem);
+          setKalenderList(deduplicateItems(items, 'kal'));
+        }
+      },
+      (err) => console.warn('Firestore kalender snapshot info:', err.message)
+    );
+
+    const unsubLayanan = onSnapshot(
+      collection(db, 'layanan'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const items = snapshot.docs.map((d) => d.data() as LayananItem);
+          setLayananList(deduplicateItems(items, 'lay'));
+        }
+      },
+      (err) => console.warn('Firestore layanan snapshot info:', err.message)
+    );
+
+    return () => {
+      unsubProfile();
+      unsubVisiMisi();
+      unsubSocial();
+      unsubSite();
+      unsubSejarah();
+      unsubPengurus();
+      unsubProgram();
+      unsubKegiatan();
+      unsubBerita();
+      unsubPrestasi();
+      unsubGaleri();
+      unsubKalender();
+      unsubLayanan();
+    };
+  }, []);
+
+  // 4. Listen to Pendaftaran & Aspirasi (only when Admin is logged in to respect PII Security Rules)
+  useEffect(() => {
+    if (!isAdminLoggedIn) return;
+
+    const unsubPendaftaran = onSnapshot(
+      collection(db, 'pendaftaran'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const items = snapshot.docs.map((d) => d.data() as PendaftaranItem);
+          setPendaftaranList(deduplicateItems(items, 'pend'));
+        }
+      },
+      (err) => console.warn('Pendaftaran listener:', err.message)
+    );
+
+    const unsubAspirasi = onSnapshot(
+      collection(db, 'aspirasi'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const items = snapshot.docs.map((d) => d.data() as AspirasiItem);
+          setAspirasiList(deduplicateItems(items, 'asp'));
+        }
+      },
+      (err) => console.warn('Aspirasi listener:', err.message)
+    );
+
+    return () => {
+      unsubPendaftaran();
+      unsubAspirasi();
+    };
+  }, [isAdminLoggedIn]);
+
+  // 5. Browser Title & Favicon sync
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    // 1. Sync Window / Tab Title
     if (profile.browserTitle) {
       document.title = profile.browserTitle;
     }
 
-    // 2. Sync Logo Title URL (Favicon & Apple Touch Icon)
     const targetFavicon = profile.faviconUrl || profile.logoUrl;
     if (targetFavicon) {
       let iconLink = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
@@ -272,7 +506,7 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
     }
   }, [profile.faviconUrl, profile.logoUrl, profile.browserTitle]);
 
-  // Sync to localStorage
+  // 6. Cache state to localStorage as fast client fallback
   useEffect(() => {
     if (!hydrated) return;
     try {
@@ -295,7 +529,7 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
     } catch (e) {
-      console.error('Error saving PGRI store to localStorage:', e);
+      console.error('Error saving local cache:', e);
     }
   }, [
     hydrated,
@@ -316,7 +550,7 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
     siteSettings,
   ]);
 
-  // Admin Auth
+  // Admin Auth Actions
   const loginAdmin = (password: string) => {
     const validPasswords = ['pgri2026', 'admin123', 'pasirwangi'];
     if (validPasswords.includes(password.trim())) {
@@ -324,66 +558,195 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
       try {
         localStorage.setItem(AUTH_KEY, 'true');
       } catch {}
-      showToast('Berhasil masuk ke Dashboard Admin PGRI', 'success');
+      showToast('Berhasil masuk panel admin!', 'success');
       return true;
     }
-    showToast('Kata sandi salah! Gunakan: pgri2026', 'error');
+    showToast('Kata sandi salah!', 'error');
     return false;
   };
 
-  const logoutAdmin = () => {
+  const loginAdminWithGoogle = async (): Promise<boolean> => {
+    try {
+      const result = await signInWithPopup(auth, googleAuthProvider);
+      if (result.user) {
+        setAdminUser(result.user);
+        setIsAdminLoggedIn(true);
+        try {
+          localStorage.setItem(AUTH_KEY, 'true');
+        } catch {}
+        showToast(`Berhasil masuk sebagai Admin: ${result.user.email}`, 'success');
+        return true;
+      }
+      return false;
+    } catch (error: any) {
+      console.error('Google Sign-In Error:', error);
+      showToast(error.message || 'Gagal masuk dengan Google', 'error');
+      return false;
+    }
+  };
+
+  const logoutAdmin = async () => {
+    try {
+      await signOut(auth);
+    } catch {}
+    setAdminUser(null);
     setIsAdminLoggedIn(false);
     try {
       localStorage.removeItem(AUTH_KEY);
     } catch {}
-    showToast('Anda telah keluar dari Dashboard Admin', 'info');
+    showToast('Anda telah keluar dari panel admin', 'info');
   };
 
-  // Profile
+  // Cloud Sync Function: Seeds or overrides Firestore with all current data
+  const syncAllToFirestore = async () => {
+    setIsSyncingCloud(true);
+    showToast('Memulai sinkronisasi seluruh data ke Cloud Firestore...', 'info');
+
+    try {
+      // 1. Settings
+      await setDoc(doc(db, 'settings', 'profile'), profile);
+      await setDoc(doc(db, 'settings', 'visiMisi'), visiMisi);
+      await setDoc(doc(db, 'settings', 'socialMedia'), socialMedia);
+      await setDoc(doc(db, 'settings', 'siteSettings'), siteSettings);
+
+      // 2. Sejarah
+      for (const item of sejarahList) {
+        await setDoc(doc(db, 'sejarah', item.id), item);
+      }
+
+      // 3. Pengurus
+      for (const item of pengurusList) {
+        await setDoc(doc(db, 'pengurus', item.id), item);
+      }
+
+      // 4. Program Kerja
+      for (const item of programKerjaList) {
+        await setDoc(doc(db, 'programKerja', item.id), item);
+      }
+
+      // 5. Kegiatan
+      for (const item of kegiatanList) {
+        await setDoc(doc(db, 'kegiatan', item.id), item);
+      }
+
+      // 6. Berita
+      for (const item of beritaList) {
+        await setDoc(doc(db, 'berita', item.id), item);
+      }
+
+      // 7. Prestasi
+      for (const item of prestasiList) {
+        await setDoc(doc(db, 'prestasi', item.id), item);
+      }
+
+      // 8. Galeri
+      for (const item of galeriList) {
+        await setDoc(doc(db, 'galeri', item.id), item);
+      }
+
+      // 9. Kalender
+      for (const item of kalenderList) {
+        await setDoc(doc(db, 'kalender', item.id), item);
+      }
+
+      // 10. Layanan
+      for (const item of layananList) {
+        await setDoc(doc(db, 'layanan', item.id), item);
+      }
+
+      showToast('Seluruh data berhasil disinkronkan ke Cloud Firestore!', 'success');
+    } catch (error) {
+      console.error('Error during cloud sync:', error);
+      handleFirestoreError(error, OperationType.WRITE, 'syncAll');
+      showToast('Gagal sinkronisasi data ke cloud. Pastikan Anda sudah login Admin.', 'error');
+    } finally {
+      setIsSyncingCloud(false);
+    }
+  };
+
+  // Profile Mutations
   const updateProfile = (updates: Partial<OrgProfile>) => {
-    setProfile((prev) => ({ ...prev, ...updates }));
-    showToast('Profil organisasi berhasil diperbarui', 'success');
+    setProfile((prev) => {
+      const updated = { ...prev, ...updates };
+      setDoc(doc(db, 'settings', 'profile'), updated).catch((err) =>
+        handleFirestoreError(err, OperationType.UPDATE, 'settings/profile')
+      );
+      return updated;
+    });
+    showToast('Profil organisasi berhasil diperbarui ke Cloud', 'success');
   };
 
   const updateStatistik = (stats: Partial<OrgProfile['statistik']>) => {
-    setProfile((prev) => ({
-      ...prev,
-      statistik: { ...prev.statistik, ...stats },
-    }));
-    showToast('Statistik organisasi berhasil diperbarui', 'success');
+    setProfile((prev) => {
+      const updated = {
+        ...prev,
+        statistik: { ...prev.statistik, ...stats },
+      };
+      setDoc(doc(db, 'settings', 'profile'), updated).catch((err) =>
+        handleFirestoreError(err, OperationType.UPDATE, 'settings/profile')
+      );
+      return updated;
+    });
+    showToast('Statistik organisasi berhasil diperbarui ke Cloud', 'success');
   };
 
-  // Sejarah
+  // Sejarah Mutations
   const addSejarah = (item: Omit<SejarahItem, 'id'>) => {
     const newItem: SejarahItem = { ...item, id: generateUniqueId('sej') };
-    setSejarahList((prev) => [...prev, newItem]);
-    showToast('Peristiwa sejarah baru berhasil ditambahkan', 'success');
+    setSejarahList((prev) => [newItem, ...prev]);
+    setDoc(doc(db, 'sejarah', newItem.id), newItem).catch((err) =>
+      handleFirestoreError(err, OperationType.CREATE, `sejarah/${newItem.id}`)
+    );
+    showToast('Peristiwa sejarah baru berhasil disimpan ke Cloud', 'success');
   };
 
   const updateSejarah = (id: string, item: Partial<SejarahItem>) => {
-    setSejarahList((prev) => prev.map((s) => (s.id === id ? { ...s, ...item } : s)));
-    showToast('Data sejarah berhasil diperbarui', 'success');
+    setSejarahList((prev) =>
+      prev.map((s) => {
+        if (s.id === id) {
+          const updated = { ...s, ...item };
+          setDoc(doc(db, 'sejarah', id), updated).catch((err) =>
+            handleFirestoreError(err, OperationType.UPDATE, `sejarah/${id}`)
+          );
+          return updated;
+        }
+        return s;
+      })
+    );
+    showToast('Peristiwa sejarah berhasil diperbarui', 'success');
   };
 
   const deleteSejarah = (id: string) => {
     setSejarahList((prev) => prev.filter((s) => s.id !== id));
-    showToast('Data sejarah berhasil dihapus', 'info');
+    deleteDoc(doc(db, 'sejarah', id)).catch((err) =>
+      handleFirestoreError(err, OperationType.DELETE, `sejarah/${id}`)
+    );
+    showToast('Peristiwa sejarah berhasil dihapus dari Cloud', 'info');
   };
 
-  // Visi Misi
+  // Visi Misi Mutations
   const updateVisiMisi = (data: Partial<VisiMisi>) => {
-    setVisiMisi((prev) => ({ ...prev, ...data }));
-    showToast('Visi & Misi berhasil diperbarui', 'success');
+    setVisiMisi((prev) => {
+      const updated = { ...prev, ...data };
+      setDoc(doc(db, 'settings', 'visiMisi'), updated).catch((err) =>
+        handleFirestoreError(err, OperationType.UPDATE, 'settings/visiMisi')
+      );
+      return updated;
+    });
+    showToast('Visi & Misi berhasil disimpan ke Cloud', 'success');
   };
 
-  // Pengurus
+  // Pengurus Mutations
   const addPengurus = (item: Omit<PengurusItem, 'id'>) => {
     const newItem: PengurusItem = { ...item, id: generateUniqueId('peng') };
     setPengurusList((prev) => [...prev, newItem]);
-    showToast('Data pengurus baru berhasil ditambahkan', 'success');
+    setDoc(doc(db, 'pengurus', newItem.id), newItem).catch((err) =>
+      handleFirestoreError(err, OperationType.CREATE, `pengurus/${newItem.id}`)
+    );
+    showToast('Data pengurus baru tersimpan ke Cloud', 'success');
   };
 
-  const importPengurusBatch = (items: Array<Omit<PengurusItem, 'id'>>) => {
+  const importPengurusBatch = async (items: Array<Omit<PengurusItem, 'id'>>) => {
     if (!items || items.length === 0) return;
     const timestamp = Date.now();
     const newItems: PengurusItem[] = items.map((item, idx) => ({
@@ -391,54 +754,112 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
       id: `peng-${timestamp}-${idx + 1}-${Math.random().toString(36).substring(2, 7)}`,
     }));
     setPengurusList((prev) => [...prev, ...newItems]);
-    showToast(`Berhasil mengimpor ${newItems.length} data pengurus dari Excel!`, 'success');
+
+    try {
+      const batch = writeBatch(db);
+      for (const item of newItems) {
+        batch.set(doc(db, 'pengurus', item.id), item);
+      }
+      await batch.commit();
+      showToast(`Berhasil menyimpan ${newItems.length} data pengurus ke Cloud Firestore!`, 'success');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'pengurus/batch');
+    }
   };
 
   const updatePengurus = (id: string, item: Partial<PengurusItem>) => {
-    setPengurusList((prev) => prev.map((p) => (p.id === id ? { ...p, ...item } : p)));
-    showToast('Data pengurus berhasil diperbarui', 'success');
+    setPengurusList((prev) =>
+      prev.map((p) => {
+        if (p.id === id) {
+          const updated = { ...p, ...item };
+          setDoc(doc(db, 'pengurus', id), updated).catch((err) =>
+            handleFirestoreError(err, OperationType.UPDATE, `pengurus/${id}`)
+          );
+          return updated;
+        }
+        return p;
+      })
+    );
+    showToast('Data pengurus berhasil diperbarui di Cloud', 'success');
   };
 
   const deletePengurus = (id: string) => {
     setPengurusList((prev) => prev.filter((p) => p.id !== id));
-    showToast('Data pengurus berhasil dihapus', 'info');
+    deleteDoc(doc(db, 'pengurus', id)).catch((err) =>
+      handleFirestoreError(err, OperationType.DELETE, `pengurus/${id}`)
+    );
+    showToast('Data pengurus berhasil dihapus dari Cloud', 'info');
   };
 
-  // Program Kerja
+  // Program Kerja Mutations
   const addProgramKerja = (item: Omit<ProgramKerjaItem, 'id'>) => {
     const newItem: ProgramKerjaItem = { ...item, id: generateUniqueId('prog') };
     setProgramKerjaList((prev) => [...prev, newItem]);
-    showToast('Program kerja baru berhasil ditambahkan', 'success');
+    setDoc(doc(db, 'programKerja', newItem.id), newItem).catch((err) =>
+      handleFirestoreError(err, OperationType.CREATE, `programKerja/${newItem.id}`)
+    );
+    showToast('Program kerja baru berhasil disimpan ke Cloud', 'success');
   };
 
   const updateProgramKerja = (id: string, item: Partial<ProgramKerjaItem>) => {
-    setProgramKerjaList((prev) => prev.map((p) => (p.id === id ? { ...p, ...item } : p)));
+    setProgramKerjaList((prev) =>
+      prev.map((p) => {
+        if (p.id === id) {
+          const updated = { ...p, ...item };
+          setDoc(doc(db, 'programKerja', id), updated).catch((err) =>
+            handleFirestoreError(err, OperationType.UPDATE, `programKerja/${id}`)
+          );
+          return updated;
+        }
+        return p;
+      })
+    );
     showToast('Program kerja berhasil diperbarui', 'success');
   };
 
   const deleteProgramKerja = (id: string) => {
     setProgramKerjaList((prev) => prev.filter((p) => p.id !== id));
-    showToast('Program kerja berhasil dihapus', 'info');
+    deleteDoc(doc(db, 'programKerja', id)).catch((err) =>
+      handleFirestoreError(err, OperationType.DELETE, `programKerja/${id}`)
+    );
+    showToast('Program kerja berhasil dihapus dari Cloud', 'info');
   };
 
-  // Kegiatan
+  // Kegiatan Mutations
   const addKegiatan = (item: Omit<KegiatanItem, 'id'>) => {
     const newItem: KegiatanItem = { ...item, id: generateUniqueId('keg') };
-    setKegiatanList((prev) => [...prev, newItem]);
-    showToast('Dokumentasi kegiatan berhasil ditambahkan', 'success');
+    setKegiatanList((prev) => [newItem, ...prev]);
+    setDoc(doc(db, 'kegiatan', newItem.id), newItem).catch((err) =>
+      handleFirestoreError(err, OperationType.CREATE, `kegiatan/${newItem.id}`)
+    );
+    showToast('Dokumentasi kegiatan berhasil disimpan ke Cloud', 'success');
   };
 
   const updateKegiatan = (id: string, item: Partial<KegiatanItem>) => {
-    setKegiatanList((prev) => prev.map((k) => (k.id === id ? { ...k, ...item } : k)));
+    setKegiatanList((prev) =>
+      prev.map((k) => {
+        if (k.id === id) {
+          const updated = { ...k, ...item };
+          setDoc(doc(db, 'kegiatan', id), updated).catch((err) =>
+            handleFirestoreError(err, OperationType.UPDATE, `kegiatan/${id}`)
+          );
+          return updated;
+        }
+        return k;
+      })
+    );
     showToast('Dokumentasi kegiatan berhasil diperbarui', 'success');
   };
 
   const deleteKegiatan = (id: string) => {
     setKegiatanList((prev) => prev.filter((k) => k.id !== id));
-    showToast('Dokumentasi kegiatan berhasil dihapus', 'info');
+    deleteDoc(doc(db, 'kegiatan', id)).catch((err) =>
+      handleFirestoreError(err, OperationType.DELETE, `kegiatan/${id}`)
+    );
+    showToast('Dokumentasi kegiatan berhasil dihapus dari Cloud', 'info');
   };
 
-  // Berita
+  // Berita Mutations
   const addBerita = (item: Omit<BeritaItem, 'id' | 'slug' | 'dibacaCount'>) => {
     const slug = item.judul
       .toLowerCase()
@@ -451,43 +872,86 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
       dibacaCount: 0,
     };
     setBeritaList((prev) => [newItem, ...prev]);
-    showToast('Berita berhasil diterbitkan', 'success');
+    setDoc(doc(db, 'berita', newItem.id), newItem).catch((err) =>
+      handleFirestoreError(err, OperationType.CREATE, `berita/${newItem.id}`)
+    );
+    showToast('Berita berhasil diterbitkan dan disimpan ke Cloud', 'success');
   };
 
   const updateBerita = (id: string, item: Partial<BeritaItem>) => {
-    setBeritaList((prev) => prev.map((b) => (b.id === id ? { ...b, ...item } : b)));
+    setBeritaList((prev) =>
+      prev.map((b) => {
+        if (b.id === id) {
+          const updated = { ...b, ...item };
+          setDoc(doc(db, 'berita', id), updated).catch((err) =>
+            handleFirestoreError(err, OperationType.UPDATE, `berita/${id}`)
+          );
+          return updated;
+        }
+        return b;
+      })
+    );
     showToast('Berita berhasil diperbarui', 'success');
   };
 
   const deleteBerita = (id: string) => {
     setBeritaList((prev) => prev.filter((b) => b.id !== id));
-    showToast('Berita berhasil dihapus', 'info');
+    deleteDoc(doc(db, 'berita', id)).catch((err) =>
+      handleFirestoreError(err, OperationType.DELETE, `berita/${id}`)
+    );
+    showToast('Berita berhasil dihapus dari Cloud', 'info');
   };
 
   const incrementBeritaViews = (id: string) => {
     setBeritaList((prev) =>
-      prev.map((b) => (b.id === id ? { ...b, dibacaCount: b.dibacaCount + 1 } : b))
+      prev.map((b) => {
+        if (b.id === id) {
+          const count = (b.dibacaCount || 0) + 1;
+          const updated = { ...b, dibacaCount: count };
+          // Fire-and-forget view count update to firestore
+          setDoc(doc(db, 'berita', id), { dibacaCount: count }, { merge: true }).catch(() => {});
+          return updated;
+        }
+        return b;
+      })
     );
   };
 
-  // Prestasi
+  // Prestasi Mutations
   const addPrestasi = (item: Omit<PrestasiItem, 'id'>) => {
     const newItem: PrestasiItem = { ...item, id: generateUniqueId('pres') };
-    setPrestasiList((prev) => [...prev, newItem]);
-    showToast('Prestasi baru berhasil ditambahkan', 'success');
+    setPrestasiList((prev) => [newItem, ...prev]);
+    setDoc(doc(db, 'prestasi', newItem.id), newItem).catch((err) =>
+      handleFirestoreError(err, OperationType.CREATE, `prestasi/${newItem.id}`)
+    );
+    showToast('Prestasi baru tersimpan ke Cloud', 'success');
   };
 
   const updatePrestasi = (id: string, item: Partial<PrestasiItem>) => {
-    setPrestasiList((prev) => prev.map((p) => (p.id === id ? { ...p, ...item } : p)));
-    showToast('Prestasi berhasil diperbarui', 'success');
+    setPrestasiList((prev) =>
+      prev.map((p) => {
+        if (p.id === id) {
+          const updated = { ...p, ...item };
+          setDoc(doc(db, 'prestasi', id), updated).catch((err) =>
+            handleFirestoreError(err, OperationType.UPDATE, `prestasi/${id}`)
+          );
+          return updated;
+        }
+        return p;
+      })
+    );
+    showToast('Prestasi berhasil diperbarui di Cloud', 'success');
   };
 
   const deletePrestasi = (id: string) => {
     setPrestasiList((prev) => prev.filter((p) => p.id !== id));
-    showToast('Prestasi berhasil dihapus', 'info');
+    deleteDoc(doc(db, 'prestasi', id)).catch((err) =>
+      handleFirestoreError(err, OperationType.DELETE, `prestasi/${id}`)
+    );
+    showToast('Prestasi berhasil dihapus dari Cloud', 'info');
   };
 
-  // Galeri
+  // Galeri Mutations
   const addGaleri = (item: Omit<GaleriItem, 'id'>) => {
     let youtubeId = item.youtubeId;
     if (item.tipe === 'video' && item.url && !youtubeId) {
@@ -495,55 +959,106 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
       if (match) youtubeId = match[1];
     }
     const newItem: GaleriItem = { ...item, id: generateUniqueId('gal'), youtubeId };
-    setGaleriList((prev) => [...prev, newItem]);
-    showToast('Item galeri berhasil ditambahkan', 'success');
+    setGaleriList((prev) => [newItem, ...prev]);
+    setDoc(doc(db, 'galeri', newItem.id), newItem).catch((err) =>
+      handleFirestoreError(err, OperationType.CREATE, `galeri/${newItem.id}`)
+    );
+    showToast('Item galeri berhasil disimpan ke Cloud', 'success');
   };
 
   const updateGaleri = (id: string, item: Partial<GaleriItem>) => {
-    setGaleriList((prev) => prev.map((g) => (g.id === id ? { ...g, ...item } : g)));
-    showToast('Item galeri berhasil diperbarui', 'success');
+    setGaleriList((prev) =>
+      prev.map((g) => {
+        if (g.id === id) {
+          const updated = { ...g, ...item };
+          setDoc(doc(db, 'galeri', id), updated).catch((err) =>
+            handleFirestoreError(err, OperationType.UPDATE, `galeri/${id}`)
+          );
+          return updated;
+        }
+        return g;
+      })
+    );
+    showToast('Item galeri berhasil diperbarui di Cloud', 'success');
   };
 
   const deleteGaleri = (id: string) => {
     setGaleriList((prev) => prev.filter((g) => g.id !== id));
-    showToast('Item galeri berhasil dihapus', 'info');
+    deleteDoc(doc(db, 'galeri', id)).catch((err) =>
+      handleFirestoreError(err, OperationType.DELETE, `galeri/${id}`)
+    );
+    showToast('Item galeri berhasil dihapus dari Cloud', 'info');
   };
 
-  // Kalender
+  // Kalender Mutations
   const addKalender = (item: Omit<KalenderItem, 'id'>) => {
     const newItem: KalenderItem = { ...item, id: generateUniqueId('kal') };
     setKalenderList((prev) => [...prev, newItem]);
-    showToast('Agenda kalender baru berhasil ditambahkan', 'success');
+    setDoc(doc(db, 'kalender', newItem.id), newItem).catch((err) =>
+      handleFirestoreError(err, OperationType.CREATE, `kalender/${newItem.id}`)
+    );
+    showToast('Agenda kalender berhasil disimpan ke Cloud', 'success');
   };
 
   const updateKalender = (id: string, item: Partial<KalenderItem>) => {
-    setKalenderList((prev) => prev.map((k) => (k.id === id ? { ...k, ...item } : k)));
-    showToast('Agenda kegiatan berhasil diperbarui', 'success');
+    setKalenderList((prev) =>
+      prev.map((k) => {
+        if (k.id === id) {
+          const updated = { ...k, ...item };
+          setDoc(doc(db, 'kalender', id), updated).catch((err) =>
+            handleFirestoreError(err, OperationType.UPDATE, `kalender/${id}`)
+          );
+          return updated;
+        }
+        return k;
+      })
+    );
+    showToast('Agenda kegiatan berhasil diperbarui di Cloud', 'success');
   };
 
   const deleteKalender = (id: string) => {
     setKalenderList((prev) => prev.filter((k) => k.id !== id));
-    showToast('Agenda kegiatan berhasil dihapus', 'info');
+    deleteDoc(doc(db, 'kalender', id)).catch((err) =>
+      handleFirestoreError(err, OperationType.DELETE, `kalender/${id}`)
+    );
+    showToast('Agenda kegiatan berhasil dihapus dari Cloud', 'info');
   };
 
-  // Layanan
+  // Layanan Mutations
   const addLayanan = (item: Omit<LayananItem, 'id'>) => {
     const newItem: LayananItem = { ...item, id: generateUniqueId('lay') };
     setLayananList((prev) => [...prev, newItem]);
-    showToast('Layanan organisasi berhasil ditambahkan', 'success');
+    setDoc(doc(db, 'layanan', newItem.id), newItem).catch((err) =>
+      handleFirestoreError(err, OperationType.CREATE, `layanan/${newItem.id}`)
+    );
+    showToast('Layanan organisasi berhasil disimpan ke Cloud', 'success');
   };
 
   const updateLayanan = (id: string, item: Partial<LayananItem>) => {
-    setLayananList((prev) => prev.map((l) => (l.id === id ? { ...l, ...item } : l)));
-    showToast('Layanan organisasi berhasil diperbarui', 'success');
+    setLayananList((prev) =>
+      prev.map((l) => {
+        if (l.id === id) {
+          const updated = { ...l, ...item };
+          setDoc(doc(db, 'layanan', id), updated).catch((err) =>
+            handleFirestoreError(err, OperationType.UPDATE, `layanan/${id}`)
+          );
+          return updated;
+        }
+        return l;
+      })
+    );
+    showToast('Layanan organisasi berhasil diperbarui di Cloud', 'success');
   };
 
   const deleteLayanan = (id: string) => {
     setLayananList((prev) => prev.filter((l) => l.id !== id));
-    showToast('Layanan organisasi berhasil dihapus', 'info');
+    deleteDoc(doc(db, 'layanan', id)).catch((err) =>
+      handleFirestoreError(err, OperationType.DELETE, `layanan/${id}`)
+    );
+    showToast('Layanan organisasi berhasil dihapus dari Cloud', 'info');
   };
 
-  // Pendaftaran
+  // Pendaftaran (Member Registration Submission)
   const submitPendaftaran = (
     data: Omit<PendaftaranItem, 'id' | 'nomorPendaftaran' | 'tanggalDaftar' | 'status'>
   ) => {
@@ -561,31 +1076,42 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
     };
 
     setPendaftaranList((prev) => [newItem, ...prev]);
-    showToast('Pendaftaran berhasil dikirim! Simpan Nomor Pendaftaran Anda.', 'success');
+    setDoc(doc(db, 'pendaftaran', newItem.id), newItem).catch((err) =>
+      handleFirestoreError(err, OperationType.CREATE, `pendaftaran/${newItem.id}`)
+    );
+    showToast('Pendaftaran berhasil dikirim! Tersimpan di Cloud.', 'success');
     return nomorPendaftaran;
   };
 
   const updatePendaftaranStatus = (id: string, status: PendaftaranItem['status'], catatan?: string) => {
     setPendaftaranList((prev) =>
-      prev.map((p) =>
-        p.id === id
-          ? {
-              ...p,
-              status,
-              ...(catatan !== undefined ? { catatanAdmin: catatan } : {}),
-            }
-          : p
-      )
+      prev.map((p) => {
+        if (p.id === id) {
+          const updated = {
+            ...p,
+            status,
+            ...(catatan !== undefined ? { catatanAdmin: catatan } : {}),
+          };
+          setDoc(doc(db, 'pendaftaran', id), updated).catch((err) =>
+            handleFirestoreError(err, OperationType.UPDATE, `pendaftaran/${id}`)
+          );
+          return updated;
+        }
+        return p;
+      })
     );
     showToast(`Status pendaftaran berhasil diperbarui: ${status}`, 'success');
   };
 
   const deletePendaftaran = (id: string) => {
     setPendaftaranList((prev) => prev.filter((p) => p.id !== id));
-    showToast('Data pendaftaran berhasil dihapus', 'info');
+    deleteDoc(doc(db, 'pendaftaran', id)).catch((err) =>
+      handleFirestoreError(err, OperationType.DELETE, `pendaftaran/${id}`)
+    );
+    showToast('Data pendaftaran berhasil dihapus dari Cloud', 'info');
   };
 
-  // Aspirasi
+  // Aspirasi (Public Aspirations)
   const submitAspirasi = (
     data: Omit<AspirasiItem, 'id' | 'tiketId' | 'tanggal' | 'status'>
   ) => {
@@ -604,6 +1130,9 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
     };
 
     setAspirasiList((prev) => [newItem, ...prev]);
+    setDoc(doc(db, 'aspirasi', newItem.id), newItem).catch((err) =>
+      handleFirestoreError(err, OperationType.CREATE, `aspirasi/${newItem.id}`)
+    );
     showToast(`Aspirasi berhasil dikirim! Nomor Tiket Anda: ${tiketId}`, 'success');
     return tiketId;
   };
@@ -611,33 +1140,53 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
   const updateAspirasiStatus = (id: string, status: AspirasiItem['status'], responAdmin?: string) => {
     const today = new Date().toISOString().split('T')[0];
     setAspirasiList((prev) =>
-      prev.map((a) =>
-        a.id === id
-          ? {
-              ...a,
-              status,
-              ...(responAdmin !== undefined ? { responAdmin, tanggalRespon: today } : {}),
-            }
-          : a
-      )
+      prev.map((a) => {
+        if (a.id === id) {
+          const updated = {
+            ...a,
+            status,
+            ...(responAdmin !== undefined ? { responAdmin, tanggalRespon: today } : {}),
+          };
+          setDoc(doc(db, 'aspirasi', id), updated).catch((err) =>
+            handleFirestoreError(err, OperationType.UPDATE, `aspirasi/${id}`)
+          );
+          return updated;
+        }
+        return a;
+      })
     );
     showToast(`Status aspirasi berhasil diperbarui: ${status}`, 'success');
   };
 
   const deleteAspirasi = (id: string) => {
     setAspirasiList((prev) => prev.filter((a) => a.id !== id));
-    showToast('Data aspirasi berhasil dihapus', 'info');
+    deleteDoc(doc(db, 'aspirasi', id)).catch((err) =>
+      handleFirestoreError(err, OperationType.DELETE, `aspirasi/${id}`)
+    );
+    showToast('Data aspirasi berhasil dihapus dari Cloud', 'info');
   };
 
-  // Social & Settings
+  // Social & Settings Mutations
   const updateSocialMedia = (data: Partial<SocialMediaLinks>) => {
-    setSocialMedia((prev) => ({ ...prev, ...data }));
-    showToast('Tautan media sosial berhasil diperbarui', 'success');
+    setSocialMedia((prev) => {
+      const updated = { ...prev, ...data };
+      setDoc(doc(db, 'settings', 'socialMedia'), updated).catch((err) =>
+        handleFirestoreError(err, OperationType.UPDATE, 'settings/socialMedia')
+      );
+      return updated;
+    });
+    showToast('Tautan media sosial berhasil disimpan ke Cloud', 'success');
   };
 
   const updateSiteSettings = (data: Partial<SiteSettings>) => {
-    setSiteSettings((prev) => ({ ...prev, ...data }));
-    showToast('Pengaturan website berhasil diperbarui', 'success');
+    setSiteSettings((prev) => {
+      const updated = { ...prev, ...data };
+      setDoc(doc(db, 'settings', 'siteSettings'), updated).catch((err) =>
+        handleFirestoreError(err, OperationType.UPDATE, 'settings/siteSettings')
+      );
+      return updated;
+    });
+    showToast('Pengaturan website berhasil disimpan ke Cloud', 'success');
   };
 
   // Reset & Backup
@@ -660,7 +1209,7 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch {}
-    showToast('Data sistem berhasil dikembalikan ke standar awal', 'info');
+    showToast('Data sistem lokal dikembalikan ke standar awal', 'info');
   };
 
   const exportDataJSON = () => {
@@ -703,7 +1252,7 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
       if (parsed.aspirasiList) setAspirasiList(deduplicateItems(parsed.aspirasiList, 'asp'));
       if (parsed.socialMedia) setSocialMedia(parsed.socialMedia);
       if (parsed.siteSettings) setSiteSettings(parsed.siteSettings);
-      showToast('Data berhasil diimpor ke sistem!', 'success');
+      showToast('Data berhasil diimpor! Silakan klik Sinkronkan ke Cloud.', 'success');
       return true;
     } catch (e) {
       showToast('Format berkas JSON tidak valid!', 'error');
@@ -730,11 +1279,16 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
         socialMedia,
         siteSettings,
         isAdminLoggedIn,
+        adminUser,
+        isCloudConnected,
+        isSyncingCloud,
         toasts,
         loginAdmin,
+        loginAdminWithGoogle,
         logoutAdmin,
         showToast,
         removeToast,
+        syncAllToFirestore,
         updateProfile,
         updateStatistik,
         addSejarah,

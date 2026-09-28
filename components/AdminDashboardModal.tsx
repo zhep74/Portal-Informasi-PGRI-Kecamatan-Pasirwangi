@@ -34,6 +34,8 @@ import {
   AlertTriangle,
   Eye,
   Camera,
+  Cloud,
+  RefreshCw,
 } from 'lucide-react';
 import { KetuaFotoUploader } from './admin/KetuaFotoUploader';
 import { LogoBrandingSettings } from './admin/LogoBrandingSettings';
@@ -104,6 +106,10 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
     exportDataJSON,
     importDataJSON,
     showToast,
+    adminUser,
+    isSyncingCloud,
+    syncAllToFirestore,
+    loginAdminWithGoogle,
   } = store;
 
   // Login form state
@@ -227,14 +233,44 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
 
           <div className="flex items-center gap-3">
             {isAdminLoggedIn && (
-              <button
-                type="button"
-                onClick={logoutAdmin}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-teal-300 hover:text-white bg-teal-950/40 hover:bg-teal-900/60 border border-teal-800/40 rounded-xl transition-colors"
-              >
-                <LogOut className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Keluar</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => syncAllToFirestore()}
+                  disabled={isSyncingCloud}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-300 hover:text-white bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-700/60 rounded-xl transition-all shadow-sm disabled:opacity-50"
+                  title="Sinkronkan semua data saat ini ke Cloud Firestore"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${isSyncingCloud ? 'animate-spin' : ''}`} />
+                  <span className="hidden sm:inline">
+                    {isSyncingCloud ? 'Menyinkronkan...' : 'Sinkron ke Cloud'}
+                  </span>
+                </button>
+
+                {adminUser ? (
+                  <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-[11px] text-emerald-400 font-medium">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span className="max-w-[140px] truncate">{adminUser.email}</span>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => loginAdminWithGoogle()}
+                    className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-xl text-[11px] text-amber-300 font-medium transition-colors"
+                  >
+                    <span>Hubungkan Google</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={logoutAdmin}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-300 hover:text-white bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/40 rounded-xl transition-colors"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Keluar</span>
+                </button>
+              </div>
             )}
 
             <button
@@ -259,31 +295,54 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
                 Masuk Dashboard Admin
               </h3>
               <p className="text-xs text-slate-500 mt-1 mb-6">
-                Masukkan kata sandi pengurus untuk mengakses panel pengelolaan data PGRI Pasirwangi.
+                Akses panel pengelolaan data PGRI Pasirwangi untuk memperbarui data di Cloud Firestore secara permanen.
               </p>
 
-              <form onSubmit={handleLogin} className="space-y-4 text-left">
-                <div>
-                  <label className="text-xs font-semibold text-slate-700 block mb-1">
-                    Kata Sandi Pengurus
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    placeholder="Masukkan sandi..."
-                    value={passwordInput}
-                    onChange={(e) => setPasswordInput(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  />
+              <div className="space-y-4">
+                {/* Google Sign In Button */}
+                <button
+                  type="button"
+                  onClick={() => loginAdminWithGoogle()}
+                  className="w-full py-3 px-4 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center justify-center gap-2.5 border border-slate-700 hover:shadow-lg cursor-pointer"
+                >
+                  <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                  </svg>
+                  <span>Masuk dengan Google (Akun Pengurus)</span>
+                </button>
+
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 h-px bg-slate-200"></div>
+                  <span className="text-[11px] text-slate-400 font-medium">atau masuk dengan sandi</span>
+                  <div className="flex-1 h-px bg-slate-200"></div>
                 </div>
 
-                <button
-                  type="submit"
-                  className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs sm:text-sm rounded-xl shadow-md transition-all"
-                >
-                  Masuk ke Panel Pengurus
-                </button>
-              </form>
+                <form onSubmit={handleLogin} className="space-y-4 text-left">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Kata Sandi Pengurus
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      placeholder="Masukkan sandi..."
+                      value={passwordInput}
+                      onChange={(e) => setPasswordInput(e.target.value)}
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs sm:text-sm rounded-xl shadow-md transition-all cursor-pointer"
+                  >
+                    Masuk ke Panel Pengurus
+                  </button>
+                </form>
+              </div>
             </div>
           </div>
         ) : (
@@ -409,11 +468,39 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
                     </div>
                   </div>
 
-                  <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-600">
-                    <p className="font-semibold text-slate-900 mb-1">
-                      Catatan Pengurus:
-                    </p>
-                    Semua perubahan yang Anda simpan di dashboard ini tersimpan secara lokal dan otomatis tercermin langsung pada portal microsite publik tanpa memerlukan reload.
+                  {/* Cloud Database Integration Status Card */}
+                  <div className="p-5 rounded-2xl bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-slate-50 border border-emerald-500/30">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-md">
+                          <Cloud className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-sm font-bold text-slate-900">
+                              Database Cloud Firestore Aktif
+                            </h4>
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                              Tersambung
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-600 mt-1 max-w-xl">
+                            Seluruh data tersimpan secara terpusat di Google Cloud Firestore. Setiap perubahan yang Anda simpan akan langsung terlihat oleh semua pengunjung dan pengguna di perangkat apa pun secara permanen (tidak akan kembali ke bawaan sistem).
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => syncAllToFirestore()}
+                        disabled={isSyncingCloud}
+                        className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl shadow-md transition-all shrink-0 cursor-pointer disabled:opacity-50"
+                      >
+                        <RefreshCw className={`w-4 h-4 ${isSyncingCloud ? 'animate-spin' : ''}`} />
+                        <span>{isSyncingCloud ? 'Menyinkronkan...' : 'Sinkronkan Data ke Cloud'}</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1176,6 +1263,25 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="p-5 rounded-2xl border border-emerald-300 bg-emerald-50/60 sm:col-span-2 space-y-3">
+                      <div className="flex items-center gap-2 font-bold text-emerald-950 text-sm">
+                        <Cloud className="w-5 h-5 text-emerald-600" />
+                        <span>Sinkronisasi Penuh ke Cloud Firestore</span>
+                      </div>
+                      <p className="text-xs text-emerald-800">
+                        Unggah dan tetapkan seluruh data profil, pengurus, sejarah, berita, program kerja, kegiatan, kalender, dan layanan saat ini ke database Cloud Firestore. Semua pengguna di berbagai perangkat akan langsung melihat data ini.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => syncAllToFirestore()}
+                        disabled={isSyncingCloud}
+                        className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+                      >
+                        <RefreshCw className={`h-4 w-4 ${isSyncingCloud ? 'animate-spin' : ''}`} />
+                        <span>{isSyncingCloud ? 'Menyinkronkan...' : 'Sinkronkan Semua Data ke Cloud Firestore'}</span>
+                      </button>
+                    </div>
+
                     <div className="p-5 rounded-2xl border border-slate-200 bg-slate-50 space-y-3">
                       <div className="font-bold text-slate-900 text-sm">Unduh Cadangan JSON</div>
                       <p className="text-xs text-slate-600">
