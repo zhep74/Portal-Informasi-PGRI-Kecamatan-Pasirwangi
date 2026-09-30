@@ -3,6 +3,7 @@
 import React, { useState, useRef } from 'react';
 import { usePgriStore } from '@/lib/store';
 import { PgriLogo, PgriSvgEmblem } from '@/components/PgriLogo';
+import { DeleteConfirmationModal } from './DeleteConfirmationModal';
 import {
   Upload,
   Link as LinkIcon,
@@ -14,6 +15,7 @@ import {
   Monitor,
   Info,
   RotateCcw,
+  Trash2,
 } from 'lucide-react';
 
 export function LogoBrandingSettings() {
@@ -26,6 +28,21 @@ export function LogoBrandingSettings() {
     profile.browserTitle || 'PGRI Kecamatan Pasirwangi | Portal Informasi Digital'
   );
   const [previewTheme, setPreviewTheme] = useState<'light' | 'dark'>('light');
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    isOpen: boolean;
+    title: string;
+    itemName: string;
+    itemType: string;
+    description: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    itemName: '',
+    itemType: '',
+    description: '',
+    onConfirm: () => {},
+  });
 
   const appLogoFileRef = useRef<HTMLInputElement>(null);
   const faviconFileRef = useRef<HTMLInputElement>(null);
@@ -362,11 +379,24 @@ export function LogoBrandingSettings() {
                 {isCustomAppLogo && (
                   <button
                     type="button"
-                    onClick={handleResetAppLogo}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+                    onClick={() => {
+                      setDeleteConfirm({
+                        isOpen: true,
+                        title: 'Hapus Logo Kustom Aplikasi?',
+                        itemName: 'Logo aplikasi kustom saat ini',
+                        itemType: 'Logo',
+                        description:
+                          'Logo kustom akan dihapus dan dikembalikan ke Lambang Vektor Resmi PGRI bawaan.',
+                        onConfirm: () => {
+                          handleResetAppLogo();
+                          setDeleteConfirm((prev) => ({ ...prev, isOpen: false }));
+                        },
+                      });
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-semibold transition-all cursor-pointer"
                     title="Hapus logo kustom dan kembali ke lambang vektor asli"
                   >
-                    <RotateCcw className="h-3.5 w-3.5 text-slate-500" />
+                    <RotateCcw className="h-3.5 w-3.5 text-rose-600" />
                     <span>Kembali ke Lambang Asli</span>
                   </button>
                 )}
@@ -621,10 +651,23 @@ export function LogoBrandingSettings() {
                 {isCustomFavicon && (
                   <button
                     type="button"
-                    onClick={handleResetFavicon}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+                    onClick={() => {
+                      setDeleteConfirm({
+                        isOpen: true,
+                        title: 'Hapus Favicon Kustom?',
+                        itemName: 'Ikon Title URL / Favicon tab browser saat ini',
+                        itemType: 'Favicon',
+                        description:
+                          'Favicon kustom akan dihapus dan dikembalikan ke Favicon Resmi PGRI bawaan.',
+                        onConfirm: () => {
+                          handleResetFavicon();
+                          setDeleteConfirm((prev) => ({ ...prev, isOpen: false }));
+                        },
+                      });
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-semibold transition-all cursor-pointer"
                   >
-                    <RotateCcw className="h-3.5 w-3.5 text-slate-500" />
+                    <RotateCcw className="h-3.5 w-3.5 text-rose-600" />
                     <span>Kembali ke Favicon Bawaan</span>
                   </button>
                 )}
@@ -687,6 +730,18 @@ export function LogoBrandingSettings() {
           </div>
         </div>
       )}
+
+      {/* Modal Konfirmasi Hapus / Reset Logo & Favicon */}
+      <DeleteConfirmationModal
+        isOpen={deleteConfirm.isOpen}
+        title={deleteConfirm.title}
+        itemName={deleteConfirm.itemName}
+        itemType={deleteConfirm.itemType}
+        description={deleteConfirm.description}
+        confirmButtonText="Ya, Hapus & Kembalikan"
+        onClose={() => setDeleteConfirm((prev) => ({ ...prev, isOpen: false }))}
+        onConfirm={deleteConfirm.onConfirm}
+      />
     </div>
   );
 }

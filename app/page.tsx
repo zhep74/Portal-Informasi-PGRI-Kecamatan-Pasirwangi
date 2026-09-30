@@ -22,6 +22,7 @@ import { SocialMediaSection } from '@/components/SocialMediaSection';
 import { Footer } from '@/components/Footer';
 import { GlobalSearchModal } from '@/components/GlobalSearchModal';
 import { AdminDashboardModal } from '@/components/AdminDashboardModal';
+import { MemberAuthModal } from '@/components/MemberAuthModal';
 
 export default function Home() {
   const [searchModalOpen, setSearchModalOpen] = useState(false);
@@ -103,6 +104,9 @@ export default function Home() {
         isOpen={adminModalOpen}
         onClose={() => setAdminModalOpen(false)}
       />
+
+      {/* Member / Teacher Login & Register Modal (Supabase Auth) */}
+      <MemberAuthModal />
     </div>
   );
 }

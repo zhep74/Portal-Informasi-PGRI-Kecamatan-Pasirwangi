@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { usePgriStore } from '@/lib/store';
+import { DeleteConfirmationModal } from './DeleteConfirmationModal';
 import {
   Compass,
   Plus,
@@ -25,6 +26,12 @@ export function AdminVisiMisiTab() {
 
   const [newMisiText, setNewMisiText] = useState('');
   const [newTujuanText, setNewTujuanText] = useState('');
+
+  const [deleteTarget, setDeleteTarget] = useState<{
+    type: 'misi' | 'tujuan';
+    index: number;
+    text: string;
+  } | null>(null);
 
   const handleSaveAll = (e: React.FormEvent) => {
     e.preventDefault();
@@ -144,8 +151,8 @@ export function AdminVisiMisiTab() {
               />
               <button
                 type="button"
-                onClick={() => removeMisi(idx)}
-                className="p-1 text-slate-400 hover:text-teal-600 rounded transition-colors"
+                onClick={() => setDeleteTarget({ type: 'misi', index: idx, text: m })}
+                className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
                 title="Hapus butir misi"
               >
                 <Trash2 className="h-4 w-4" />
@@ -210,8 +217,8 @@ export function AdminVisiMisiTab() {
               />
               <button
                 type="button"
-                onClick={() => removeTujuan(idx)}
-                className="p-1 text-slate-400 hover:text-teal-600 rounded transition-colors"
+                onClick={() => setDeleteTarget({ type: 'tujuan', index: idx, text: t })}
+                className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
                 title="Hapus butir tujuan"
               >
                 <Trash2 className="h-4 w-4" />
@@ -245,6 +252,26 @@ export function AdminVisiMisiTab() {
           </button>
         </div>
       </div>
+
+      {/* MODAL VERIFIKASI HAPUS MISI / TUJUAN */}
+      <DeleteConfirmationModal
+        isOpen={!!deleteTarget}
+        title={deleteTarget?.type === 'misi' ? 'Hapus Butir Misi?' : 'Hapus Butir Tujuan?'}
+        itemName={deleteTarget ? deleteTarget.text : ''}
+        itemType={deleteTarget?.type === 'misi' ? 'Misi' : 'Tujuan'}
+        description={`Butir ${deleteTarget?.type === 'misi' ? 'misi' : 'tujuan'} ini akan dihapus dari draf saat ini.`}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) {
+            if (deleteTarget.type === 'misi') {
+              removeMisi(deleteTarget.index);
+            } else {
+              removeTujuan(deleteTarget.index);
+            }
+            setDeleteTarget(null);
+          }
+        }}
+      />
     </form>
   );
 }

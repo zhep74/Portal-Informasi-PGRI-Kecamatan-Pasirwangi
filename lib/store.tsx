@@ -36,21 +36,39 @@ import {
   initialSiteSettings,
 } from './initialData';
 import {
-  auth,
-  db,
-  googleAuthProvider,
-  handleFirestoreError,
-  OperationType,
-} from './firebase';
-import { onAuthStateChanged, signInWithPopup, signOut, User } from 'firebase/auth';
-import {
-  collection,
-  doc,
-  onSnapshot,
-  setDoc,
-  deleteDoc,
-  writeBatch,
-} from 'firebase/firestore';
+  supabase,
+  saveItemToSupabase,
+  fetchAllFromSupabase,
+  testSupabaseConnection,
+  signInWithSupabase,
+  signUpWithSupabase,
+  signOutSupabase,
+  saveProfilToSupabase,
+  saveSejarahToSupabase,
+  deleteSejarahFromSupabase,
+  saveVisiMisiToSupabase,
+  savePengurusToSupabase,
+  deletePengurusFromSupabase,
+  saveProgramKerjaToSupabase,
+  deleteProgramKerjaFromSupabase,
+  saveKegiatanToSupabase,
+  deleteKegiatanFromSupabase,
+  saveBeritaToSupabase,
+  deleteBeritaFromSupabase,
+  savePrestasiToSupabase,
+  deletePrestasiFromSupabase,
+  saveGaleriToSupabase,
+  deleteGaleriFromSupabase,
+  saveKalenderToSupabase,
+  deleteKalenderFromSupabase,
+  saveLayananToSupabase,
+  deleteLayananFromSupabase,
+  saveAspirasiToSupabase,
+  deleteAspirasiFromSupabase,
+  savePendaftaranToSupabase,
+  deletePendaftaranFromSupabase,
+} from './supabase';
+import type { User as SupabaseUser } from '@supabase/supabase-js';
 
 export interface ToastMessage {
   id: string;
@@ -75,10 +93,34 @@ interface PgriContextType {
   socialMedia: SocialMediaLinks;
   siteSettings: SiteSettings;
   isAdminLoggedIn: boolean;
-  adminUser: User | null;
+  adminUser: SupabaseUser | null;
   isCloudConnected: boolean;
   isSyncingCloud: boolean;
   toasts: ToastMessage[];
+
+  // Supabase Auth & Member State
+  supabaseUser: SupabaseUser | null;
+  isMemberAuthModalOpen: boolean;
+  memberAuthDefaultTab: 'login' | 'register';
+  openMemberAuthModal: (mode?: 'login' | 'register') => void;
+  closeMemberAuthModal: () => void;
+  loginMemberWithSupabase: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  registerMemberWithSupabase: (email: string, password: string, fullName: string) => Promise<{ success: boolean; error?: string }>;
+  logoutMemberWithSupabase: () => Promise<void>;
+
+  // Supabase Database Connection & Sync
+  supabaseStatus: {
+    connected: boolean;
+    totalTablesReady: number;
+    tableDetails: Record<string, boolean>;
+    pendaftaranTableExists: boolean;
+    storeTableExists: boolean;
+    message: string;
+    checking: boolean;
+  };
+  isSyncingSupabase: boolean;
+  checkSupabaseStatus: () => Promise<void>;
+  syncAllToSupabase: () => Promise<void>;
 
   // Admin Auth
   loginAdmin: (password: string) => boolean;
@@ -87,7 +129,7 @@ interface PgriContextType {
   showToast: (message: string, type?: 'success' | 'error' | 'info' | 'warning') => void;
   removeToast: (id: string) => void;
 
-  // Cloud Synchronization
+  // Cloud Synchronization (Supabase)
   syncAllToFirestore: () => Promise<void>;
 
   // Profile
@@ -164,17 +206,12 @@ interface PgriContextType {
   importDataJSON: (jsonString: string) => boolean;
 }
 
+const STORAGE_KEY = 'pgri_pasirwangi_store_v1';
+const AUTH_KEY = 'pgri_admin_auth';
+
 const PgriContext = createContext<PgriContextType | undefined>(undefined);
 
-const STORAGE_KEY = 'pgri_pasirwangi_store_v1';
-const AUTH_KEY = 'pgri_pasirwangi_admin_session';
-
-function generateUniqueId(prefix: string): string {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-}
-
 function deduplicateItems<T extends { id: string }>(items: T[], prefix: string): T[] {
-  if (!Array.isArray(items)) return [];
   const seenIds = new Set<string>();
   return items.map((item, index) => {
     let id = item.id;
@@ -204,11 +241,31 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
   const [siteSettings, setSiteSettings] = useState<SiteSettings>(initialSiteSettings);
 
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(false);
-  const [adminUser, setAdminUser] = useState<User | null>(null);
-  const [isCloudConnected, setIsCloudConnected] = useState<boolean>(true);
-  const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [hydrated, setHydrated] = useState<boolean>(false);
+
+  // Supabase states
+  const [supabaseUser, setSupabaseUser] = useState<SupabaseUser | null>(null);
+  const [isMemberAuthModalOpen, setIsMemberAuthModalOpen] = useState<boolean>(false);
+  const [memberAuthDefaultTab, setMemberAuthDefaultTab] = useState<'login' | 'register'>('login');
+  const [supabaseStatus, setSupabaseStatus] = useState<{
+    connected: boolean;
+    totalTablesReady: number;
+    tableDetails: Record<string, boolean>;
+    pendaftaranTableExists: boolean;
+    storeTableExists: boolean;
+    message: string;
+    checking: boolean;
+  }>({
+    connected: false,
+    totalTablesReady: 0,
+    tableDetails: {},
+    pendaftaranTableExists: false,
+    storeTableExists: false,
+    message: 'Memeriksa koneksi Supabase...',
+    checking: true,
+  });
+  const [isSyncingSupabase, setIsSyncingSupabase] = useState<boolean>(false);
 
   const showToast = useCallback((message: string, type: ToastMessage['type'] = 'success') => {
     const id = Math.random().toString(36).substring(2, 9);
@@ -222,26 +279,100 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  // 1. Listen to Firebase Auth state
+  const openMemberAuthModal = (mode: 'login' | 'register' = 'login') => {
+    setMemberAuthDefaultTab(mode);
+    setIsMemberAuthModalOpen(true);
+  };
+
+  const closeMemberAuthModal = () => {
+    setIsMemberAuthModalOpen(false);
+  };
+
+  // Check Supabase connection and tables status
+  const checkSupabaseStatus = useCallback(async () => {
+    setSupabaseStatus((prev) => ({ ...prev, checking: true }));
+    try {
+      const res = await testSupabaseConnection();
+      setSupabaseStatus({
+        connected: res.connected,
+        totalTablesReady: res.totalTablesReady,
+        tableDetails: res.tableDetails,
+        pendaftaranTableExists: res.pendaftaranTableExists,
+        storeTableExists: res.storeTableExists,
+        message: res.message,
+        checking: false,
+      });
+    } catch {
+      setSupabaseStatus((prev) => ({
+        ...prev,
+        connected: false,
+        checking: false,
+        message: 'Tidak dapat tersambung ke database Supabase.',
+      }));
+    }
+  }, []);
+
+  // Supabase Auth Methods
+  const loginMemberWithSupabase = async (email: string, password: string) => {
+    const res = await signInWithSupabase(email, password);
+    if (res.error) {
+      showToast(`Gagal masuk: ${res.error}`, 'error');
+      return { success: false, error: res.error };
+    }
+    showToast(`Selamat datang kembali!`, 'success');
+    if (res.user?.email?.toLowerCase() === 'asepakon74@gmail.com') {
+      setIsAdminLoggedIn(true);
+      try {
+        localStorage.setItem(AUTH_KEY, 'true');
+      } catch {}
+    }
+    return { success: true };
+  };
+
+  const registerMemberWithSupabase = async (email: string, password: string, fullName: string) => {
+    const res = await signUpWithSupabase(email, password, fullName);
+    if (res.error) {
+      showToast(`Gagal mendaftar: ${res.error}`, 'error');
+      return { success: false, error: res.error };
+    }
+    showToast('Pendaftaran akun berhasil dibuat di Supabase!', 'success');
+    return { success: true };
+  };
+
+  const logoutMemberWithSupabase = async () => {
+    await signOutSupabase();
+    setSupabaseUser(null);
+    showToast('Berhasil keluar dari akun.', 'info');
+  };
+
+  // 1. Listen to Supabase Auth state & check connection
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        setAdminUser(user);
-        setIsAdminLoggedIn(true);
-        try {
-          localStorage.setItem(AUTH_KEY, 'true');
-        } catch {}
-      } else {
-        setAdminUser(null);
-        const savedAuth = typeof window !== 'undefined' ? localStorage.getItem(AUTH_KEY) : null;
-        if (savedAuth !== 'true') {
-          setIsAdminLoggedIn(false);
+    const timer = setTimeout(() => {
+      checkSupabaseStatus();
+    }, 0);
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session?.user) {
+        setSupabaseUser(data.session.user);
+        if (data.session.user.email?.toLowerCase() === 'asepakon74@gmail.com') {
+          setIsAdminLoggedIn(true);
         }
       }
     });
 
-    return () => unsubscribe();
-  }, []);
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      const user = session?.user || null;
+      setSupabaseUser(user);
+      if (user?.email?.toLowerCase() === 'asepakon74@gmail.com') {
+        setIsAdminLoggedIn(true);
+      }
+    });
+
+    return () => {
+      clearTimeout(timer);
+      authListener.subscription.unsubscribe();
+    };
+  }, [checkSupabaseStatus]);
 
   // 2. Hydrate from localStorage for instant initial paint
   useEffect(() => {
@@ -281,202 +412,70 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
     return () => clearTimeout(timer);
   }, []);
 
-  // 3. REALTIME CLOUD FIRESTORE SUBSCRIPTIONS
-  // Every user who opens the website connects to Firestore and gets instant updates
+  // 3. Load initial remote data from Supabase pgri_store if available
   useEffect(() => {
-    // A. Settings (Profile, VisiMisi, SocialMedia, SiteSettings)
-    const unsubProfile = onSnapshot(
-      doc(db, 'settings', 'profile'),
-      (snapshot) => {
-        if (snapshot.exists()) {
-          setProfile((prev) => ({ ...prev, ...(snapshot.data() as OrgProfile) }));
+    const loadFromSupabase = async () => {
+      try {
+        const remoteData = await fetchAllFromSupabase();
+        if (remoteData) {
+          if (remoteData.profile) setProfile((prev) => ({ ...prev, ...remoteData.profile }));
+          if (remoteData.sejarahList) setSejarahList(deduplicateItems(remoteData.sejarahList, 'sej'));
+          if (remoteData.visiMisi) setVisiMisi(remoteData.visiMisi);
+          if (remoteData.pengurusList) setPengurusList(deduplicateItems(remoteData.pengurusList, 'peng'));
+          if (remoteData.programKerjaList) setProgramKerjaList(deduplicateItems(remoteData.programKerjaList, 'prog'));
+          if (remoteData.kegiatanList) setKegiatanList(deduplicateItems(remoteData.kegiatanList, 'keg'));
+          if (remoteData.beritaList) setBeritaList(deduplicateItems(remoteData.beritaList, 'ber'));
+          if (remoteData.prestasiList) setPrestasiList(deduplicateItems(remoteData.prestasiList, 'pres'));
+          if (remoteData.galeriList) setGaleriList(deduplicateItems(remoteData.galeriList, 'gal'));
+          if (remoteData.kalenderList) setKalenderList(deduplicateItems(remoteData.kalenderList, 'kal'));
+          if (remoteData.layananList) setLayananList(deduplicateItems(remoteData.layananList, 'lay'));
+          if (remoteData.pendaftaranList) setPendaftaranList(deduplicateItems(remoteData.pendaftaranList, 'pend'));
+          if (remoteData.aspirasiList) setAspirasiList(deduplicateItems(remoteData.aspirasiList, 'asp'));
+          if (remoteData.socialMedia) setSocialMedia(remoteData.socialMedia);
+          if (remoteData.siteSettings) setSiteSettings(remoteData.siteSettings);
         }
-      },
-      (err) => {
-        console.warn('Firestore profile snapshot info:', err.message);
+      } catch (err) {
+        console.warn('Supabase fetch initial data notice:', err);
       }
-    );
-
-    const unsubVisiMisi = onSnapshot(
-      doc(db, 'settings', 'visiMisi'),
-      (snapshot) => {
-        if (snapshot.exists()) {
-          setVisiMisi(snapshot.data() as VisiMisi);
-        }
-      },
-      (err) => console.warn('Firestore visiMisi snapshot info:', err.message)
-    );
-
-    const unsubSocial = onSnapshot(
-      doc(db, 'settings', 'socialMedia'),
-      (snapshot) => {
-        if (snapshot.exists()) {
-          setSocialMedia(snapshot.data() as SocialMediaLinks);
-        }
-      },
-      (err) => console.warn('Firestore socialMedia snapshot info:', err.message)
-    );
-
-    const unsubSite = onSnapshot(
-      doc(db, 'settings', 'siteSettings'),
-      (snapshot) => {
-        if (snapshot.exists()) {
-          setSiteSettings(snapshot.data() as SiteSettings);
-        }
-      },
-      (err) => console.warn('Firestore siteSettings snapshot info:', err.message)
-    );
-
-    // B. Collections
-    const unsubSejarah = onSnapshot(
-      collection(db, 'sejarah'),
-      (snapshot) => {
-        if (!snapshot.empty) {
-          const items = snapshot.docs.map((d) => d.data() as SejarahItem);
-          setSejarahList(deduplicateItems(items, 'sej'));
-        }
-      },
-      (err) => console.warn('Firestore sejarah snapshot info:', err.message)
-    );
-
-    const unsubPengurus = onSnapshot(
-      collection(db, 'pengurus'),
-      (snapshot) => {
-        if (!snapshot.empty) {
-          const items = snapshot.docs.map((d) => d.data() as PengurusItem);
-          // Sort by noUrut
-          items.sort((a, b) => (a.noUrut || 0) - (b.noUrut || 0));
-          setPengurusList(deduplicateItems(items, 'peng'));
-        }
-      },
-      (err) => console.warn('Firestore pengurus snapshot info:', err.message)
-    );
-
-    const unsubProgram = onSnapshot(
-      collection(db, 'programKerja'),
-      (snapshot) => {
-        if (!snapshot.empty) {
-          const items = snapshot.docs.map((d) => d.data() as ProgramKerjaItem);
-          setProgramKerjaList(deduplicateItems(items, 'prog'));
-        }
-      },
-      (err) => console.warn('Firestore programKerja snapshot info:', err.message)
-    );
-
-    const unsubKegiatan = onSnapshot(
-      collection(db, 'kegiatan'),
-      (snapshot) => {
-        if (!snapshot.empty) {
-          const items = snapshot.docs.map((d) => d.data() as KegiatanItem);
-          setKegiatanList(deduplicateItems(items, 'keg'));
-        }
-      },
-      (err) => console.warn('Firestore kegiatan snapshot info:', err.message)
-    );
-
-    const unsubBerita = onSnapshot(
-      collection(db, 'berita'),
-      (snapshot) => {
-        if (!snapshot.empty) {
-          const items = snapshot.docs.map((d) => d.data() as BeritaItem);
-          setBeritaList(deduplicateItems(items, 'ber'));
-        }
-      },
-      (err) => console.warn('Firestore berita snapshot info:', err.message)
-    );
-
-    const unsubPrestasi = onSnapshot(
-      collection(db, 'prestasi'),
-      (snapshot) => {
-        if (!snapshot.empty) {
-          const items = snapshot.docs.map((d) => d.data() as PrestasiItem);
-          setPrestasiList(deduplicateItems(items, 'pres'));
-        }
-      },
-      (err) => console.warn('Firestore prestasi snapshot info:', err.message)
-    );
-
-    const unsubGaleri = onSnapshot(
-      collection(db, 'galeri'),
-      (snapshot) => {
-        if (!snapshot.empty) {
-          const items = snapshot.docs.map((d) => d.data() as GaleriItem);
-          setGaleriList(deduplicateItems(items, 'gal'));
-        }
-      },
-      (err) => console.warn('Firestore galeri snapshot info:', err.message)
-    );
-
-    const unsubKalender = onSnapshot(
-      collection(db, 'kalender'),
-      (snapshot) => {
-        if (!snapshot.empty) {
-          const items = snapshot.docs.map((d) => d.data() as KalenderItem);
-          setKalenderList(deduplicateItems(items, 'kal'));
-        }
-      },
-      (err) => console.warn('Firestore kalender snapshot info:', err.message)
-    );
-
-    const unsubLayanan = onSnapshot(
-      collection(db, 'layanan'),
-      (snapshot) => {
-        if (!snapshot.empty) {
-          const items = snapshot.docs.map((d) => d.data() as LayananItem);
-          setLayananList(deduplicateItems(items, 'lay'));
-        }
-      },
-      (err) => console.warn('Firestore layanan snapshot info:', err.message)
-    );
-
-    return () => {
-      unsubProfile();
-      unsubVisiMisi();
-      unsubSocial();
-      unsubSite();
-      unsubSejarah();
-      unsubPengurus();
-      unsubProgram();
-      unsubKegiatan();
-      unsubBerita();
-      unsubPrestasi();
-      unsubGaleri();
-      unsubKalender();
-      unsubLayanan();
     };
+
+    loadFromSupabase();
   }, []);
 
-  // 4. Listen to Pendaftaran & Aspirasi (only when Admin is logged in to respect PII Security Rules)
+  // 4. Supabase Realtime channel subscription for multi-user sync
   useEffect(() => {
-    if (!isAdminLoggedIn) return;
-
-    const unsubPendaftaran = onSnapshot(
-      collection(db, 'pendaftaran'),
-      (snapshot) => {
-        if (!snapshot.empty) {
-          const items = snapshot.docs.map((d) => d.data() as PendaftaranItem);
-          setPendaftaranList(deduplicateItems(items, 'pend'));
+    const channel = supabase
+      .channel('pgri_realtime_sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'pgri_store' },
+        (payload: any) => {
+          if (payload.new && payload.new.key && payload.new.data) {
+            const { key, data } = payload.new;
+            if (key === 'profile') setProfile((prev) => ({ ...prev, ...data }));
+            else if (key === 'visiMisi') setVisiMisi(data);
+            else if (key === 'socialMedia') setSocialMedia(data);
+            else if (key === 'siteSettings') setSiteSettings(data);
+            else if (key === 'sejarahList') setSejarahList(deduplicateItems(data, 'sej'));
+            else if (key === 'pengurusList') setPengurusList(deduplicateItems(data, 'peng'));
+            else if (key === 'programKerjaList') setProgramKerjaList(deduplicateItems(data, 'prog'));
+            else if (key === 'kegiatanList') setKegiatanList(deduplicateItems(data, 'keg'));
+            else if (key === 'beritaList') setBeritaList(deduplicateItems(data, 'ber'));
+            else if (key === 'prestasiList') setPrestasiList(deduplicateItems(data, 'pres'));
+            else if (key === 'galeriList') setGaleriList(deduplicateItems(data, 'gal'));
+            else if (key === 'kalenderList') setKalenderList(deduplicateItems(data, 'kal'));
+            else if (key === 'layananList') setLayananList(deduplicateItems(data, 'lay'));
+            else if (key === 'pendaftaranList') setPendaftaranList(deduplicateItems(data, 'pend'));
+            else if (key === 'aspirasiList') setAspirasiList(deduplicateItems(data, 'asp'));
+          }
         }
-      },
-      (err) => console.warn('Pendaftaran listener:', err.message)
-    );
-
-    const unsubAspirasi = onSnapshot(
-      collection(db, 'aspirasi'),
-      (snapshot) => {
-        if (!snapshot.empty) {
-          const items = snapshot.docs.map((d) => d.data() as AspirasiItem);
-          setAspirasiList(deduplicateItems(items, 'asp'));
-        }
-      },
-      (err) => console.warn('Aspirasi listener:', err.message)
-    );
+      )
+      .subscribe();
 
     return () => {
-      unsubPendaftaran();
-      unsubAspirasi();
+      supabase.removeChannel(channel);
     };
-  }, [isAdminLoggedIn]);
+  }, []);
 
   // 5. Browser Title & Favicon sync
   useEffect(() => {
@@ -566,30 +565,11 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
   };
 
   const loginAdminWithGoogle = async (): Promise<boolean> => {
-    try {
-      const result = await signInWithPopup(auth, googleAuthProvider);
-      if (result.user) {
-        setAdminUser(result.user);
-        setIsAdminLoggedIn(true);
-        try {
-          localStorage.setItem(AUTH_KEY, 'true');
-        } catch {}
-        showToast(`Berhasil masuk sebagai Admin: ${result.user.email}`, 'success');
-        return true;
-      }
-      return false;
-    } catch (error: any) {
-      console.error('Google Sign-In Error:', error);
-      showToast(error.message || 'Gagal masuk dengan Google', 'error');
-      return false;
-    }
+    openMemberAuthModal('login');
+    return true;
   };
 
   const logoutAdmin = async () => {
-    try {
-      await signOut(auth);
-    } catch {}
-    setAdminUser(null);
     setIsAdminLoggedIn(false);
     try {
       localStorage.removeItem(AUTH_KEY);
@@ -597,83 +577,125 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
     showToast('Anda telah keluar dari panel admin', 'info');
   };
 
-  // Cloud Sync Function: Seeds or overrides Firestore with all current data
-  const syncAllToFirestore = async () => {
-    setIsSyncingCloud(true);
-    showToast('Memulai sinkronisasi seluruh data ke Cloud Firestore...', 'info');
+  // Supabase Sync: Seeds Supabase dedicated tables and pgri_store
+  const syncAllToSupabase = async () => {
+    setIsSyncingSupabase(true);
+    showToast('Menyinkronkan seluruh data ke tabel Supabase...', 'info');
 
     try {
-      // 1. Settings
-      await setDoc(doc(db, 'settings', 'profile'), profile);
-      await setDoc(doc(db, 'settings', 'visiMisi'), visiMisi);
-      await setDoc(doc(db, 'settings', 'socialMedia'), socialMedia);
-      await setDoc(doc(db, 'settings', 'siteSettings'), siteSettings);
+      // 1. Profil & Statistik
+      await saveProfilToSupabase(profile);
 
-      // 2. Sejarah
+      // 2. Visi Misi
+      await saveVisiMisiToSupabase(visiMisi);
+
+      // 3. Sejarah
       for (const item of sejarahList) {
-        await setDoc(doc(db, 'sejarah', item.id), item);
+        await saveSejarahToSupabase(item);
       }
 
-      // 3. Pengurus
+      // 4. Pengurus
       for (const item of pengurusList) {
-        await setDoc(doc(db, 'pengurus', item.id), item);
+        await savePengurusToSupabase(item);
       }
 
-      // 4. Program Kerja
+      // 5. Program Kerja
       for (const item of programKerjaList) {
-        await setDoc(doc(db, 'programKerja', item.id), item);
+        await saveProgramKerjaToSupabase(item);
       }
 
-      // 5. Kegiatan
+      // 6. Kegiatan
       for (const item of kegiatanList) {
-        await setDoc(doc(db, 'kegiatan', item.id), item);
+        await saveKegiatanToSupabase(item);
       }
 
-      // 6. Berita
+      // 7. Berita
       for (const item of beritaList) {
-        await setDoc(doc(db, 'berita', item.id), item);
+        await saveBeritaToSupabase(item);
       }
 
-      // 7. Prestasi
+      // 8. Prestasi
       for (const item of prestasiList) {
-        await setDoc(doc(db, 'prestasi', item.id), item);
+        await savePrestasiToSupabase(item);
       }
 
-      // 8. Galeri
+      // 9. Galeri
       for (const item of galeriList) {
-        await setDoc(doc(db, 'galeri', item.id), item);
+        await saveGaleriToSupabase(item);
       }
 
-      // 9. Kalender
+      // 10. Kalender
       for (const item of kalenderList) {
-        await setDoc(doc(db, 'kalender', item.id), item);
+        await saveKalenderToSupabase(item);
       }
 
-      // 10. Layanan
+      // 11. Layanan
       for (const item of layananList) {
-        await setDoc(doc(db, 'layanan', item.id), item);
+        await saveLayananToSupabase(item);
       }
 
-      showToast('Seluruh data berhasil disinkronkan ke Cloud Firestore!', 'success');
-    } catch (error) {
-      console.error('Error during cloud sync:', error);
-      handleFirestoreError(error, OperationType.WRITE, 'syncAll');
-      showToast('Gagal sinkronisasi data ke cloud. Pastikan Anda sudah login Admin.', 'error');
+      // 12. Aspirasi
+      for (const item of aspirasiList) {
+        await saveAspirasiToSupabase(item);
+      }
+
+      // 13. Pendaftaran
+      for (const p of pendaftaranList) {
+        await savePendaftaranToSupabase(p);
+      }
+
+      // 14. Universal Store Backup
+      const storeItems = [
+        { key: 'profile', data: profile },
+        { key: 'visiMisi', data: visiMisi },
+        { key: 'socialMedia', data: socialMedia },
+        { key: 'siteSettings', data: siteSettings },
+        { key: 'sejarahList', data: sejarahList },
+        { key: 'pengurusList', data: pengurusList },
+        { key: 'programKerjaList', data: programKerjaList },
+        { key: 'kegiatanList', data: kegiatanList },
+        { key: 'beritaList', data: beritaList },
+        { key: 'prestasiList', data: prestasiList },
+        { key: 'galeriList', data: galeriList },
+        { key: 'kalenderList', data: kalenderList },
+        { key: 'layananList', data: layananList },
+        { key: 'pendaftaranList', data: pendaftaranList },
+        { key: 'aspirasiList', data: aspirasiList },
+      ];
+
+      for (const item of storeItems) {
+        await saveItemToSupabase(item.key, item.data);
+      }
+
+      await checkSupabaseStatus();
+      showToast('Seluruh data pada semua menu admin berhasil disimpan ke tabel Supabase!', 'success');
+    } catch (err: any) {
+      console.error('Supabase sync error:', err);
+      showToast(`Gagal sinkron ke Supabase: ${err.message || 'Cek tabel di Supabase SQL Editor'}`, 'error');
     } finally {
-      setIsSyncingCloud(false);
+      setIsSyncingSupabase(false);
     }
+  };
+
+  const syncAllToFirestore = async () => {
+    // Aliased to Supabase sync for backward compatibility
+    await syncAllToSupabase();
+  };
+
+  // Helper function to generate unique ID
+  const generateUniqueId = (prefix: string) => {
+    return `${prefix}-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
   };
 
   // Profile Mutations
   const updateProfile = (updates: Partial<OrgProfile>) => {
     setProfile((prev) => {
       const updated = { ...prev, ...updates };
-      setDoc(doc(db, 'settings', 'profile'), updated).catch((err) =>
-        handleFirestoreError(err, OperationType.UPDATE, 'settings/profile')
-      );
+      saveProfilToSupabase(updated);
+      saveItemToSupabase('profile', updated);
       return updated;
     });
-    showToast('Profil organisasi berhasil diperbarui ke Cloud', 'success');
+    showToast('Profil organisasi berhasil diperbarui di Supabase', 'success');
   };
 
   const updateStatistik = (stats: Partial<OrgProfile['statistik']>) => {
@@ -682,68 +704,72 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
         ...prev,
         statistik: { ...prev.statistik, ...stats },
       };
-      setDoc(doc(db, 'settings', 'profile'), updated).catch((err) =>
-        handleFirestoreError(err, OperationType.UPDATE, 'settings/profile')
-      );
+      saveProfilToSupabase(updated);
+      saveItemToSupabase('profile', updated);
       return updated;
     });
-    showToast('Statistik organisasi berhasil diperbarui ke Cloud', 'success');
+    showToast('Statistik organisasi berhasil diperbarui di Supabase', 'success');
   };
 
   // Sejarah Mutations
   const addSejarah = (item: Omit<SejarahItem, 'id'>) => {
     const newItem: SejarahItem = { ...item, id: generateUniqueId('sej') };
-    setSejarahList((prev) => [newItem, ...prev]);
-    setDoc(doc(db, 'sejarah', newItem.id), newItem).catch((err) =>
-      handleFirestoreError(err, OperationType.CREATE, `sejarah/${newItem.id}`)
-    );
-    showToast('Peristiwa sejarah baru berhasil disimpan ke Cloud', 'success');
+    setSejarahList((prev) => {
+      const next = [newItem, ...prev];
+      saveItemToSupabase('sejarahList', next);
+      return next;
+    });
+    saveSejarahToSupabase(newItem);
+    showToast('Peristiwa sejarah baru berhasil disimpan ke Supabase', 'success');
   };
 
   const updateSejarah = (id: string, item: Partial<SejarahItem>) => {
-    setSejarahList((prev) =>
-      prev.map((s) => {
+    setSejarahList((prev) => {
+      const next = prev.map((s) => {
         if (s.id === id) {
           const updated = { ...s, ...item };
-          setDoc(doc(db, 'sejarah', id), updated).catch((err) =>
-            handleFirestoreError(err, OperationType.UPDATE, `sejarah/${id}`)
-          );
+          saveSejarahToSupabase(updated);
           return updated;
         }
         return s;
-      })
-    );
-    showToast('Peristiwa sejarah berhasil diperbarui', 'success');
+      });
+      saveItemToSupabase('sejarahList', next);
+      return next;
+    });
+    showToast('Peristiwa sejarah berhasil diperbarui di Supabase', 'success');
   };
 
   const deleteSejarah = (id: string) => {
-    setSejarahList((prev) => prev.filter((s) => s.id !== id));
-    deleteDoc(doc(db, 'sejarah', id)).catch((err) =>
-      handleFirestoreError(err, OperationType.DELETE, `sejarah/${id}`)
-    );
-    showToast('Peristiwa sejarah berhasil dihapus dari Cloud', 'info');
+    setSejarahList((prev) => {
+      const next = prev.filter((s) => s.id !== id);
+      saveItemToSupabase('sejarahList', next);
+      return next;
+    });
+    deleteSejarahFromSupabase(id);
+    showToast('Peristiwa sejarah berhasil dihapus dari Supabase', 'info');
   };
 
   // Visi Misi Mutations
   const updateVisiMisi = (data: Partial<VisiMisi>) => {
     setVisiMisi((prev) => {
       const updated = { ...prev, ...data };
-      setDoc(doc(db, 'settings', 'visiMisi'), updated).catch((err) =>
-        handleFirestoreError(err, OperationType.UPDATE, 'settings/visiMisi')
-      );
+      saveVisiMisiToSupabase(updated);
+      saveItemToSupabase('visiMisi', updated);
       return updated;
     });
-    showToast('Visi & Misi berhasil disimpan ke Cloud', 'success');
+    showToast('Visi & Misi berhasil disimpan ke Supabase', 'success');
   };
 
   // Pengurus Mutations
   const addPengurus = (item: Omit<PengurusItem, 'id'>) => {
     const newItem: PengurusItem = { ...item, id: generateUniqueId('peng') };
-    setPengurusList((prev) => [...prev, newItem]);
-    setDoc(doc(db, 'pengurus', newItem.id), newItem).catch((err) =>
-      handleFirestoreError(err, OperationType.CREATE, `pengurus/${newItem.id}`)
-    );
-    showToast('Data pengurus baru tersimpan ke Cloud', 'success');
+    setPengurusList((prev) => {
+      const next = [...prev, newItem];
+      saveItemToSupabase('pengurusList', next);
+      return next;
+    });
+    savePengurusToSupabase(newItem);
+    showToast('Data pengurus baru tersimpan ke Supabase', 'success');
   };
 
   const importPengurusBatch = async (items: Array<Omit<PengurusItem, 'id'>>) => {
@@ -753,110 +779,118 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
       ...item,
       id: `peng-${timestamp}-${idx + 1}-${Math.random().toString(36).substring(2, 7)}`,
     }));
-    setPengurusList((prev) => [...prev, ...newItems]);
+    setPengurusList((prev) => {
+      const next = [...prev, ...newItems];
+      saveItemToSupabase('pengurusList', next);
+      return next;
+    });
 
-    try {
-      const batch = writeBatch(db);
-      for (const item of newItems) {
-        batch.set(doc(db, 'pengurus', item.id), item);
-      }
-      await batch.commit();
-      showToast(`Berhasil menyimpan ${newItems.length} data pengurus ke Cloud Firestore!`, 'success');
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, 'pengurus/batch');
+    for (const item of newItems) {
+      savePengurusToSupabase(item);
     }
+    showToast(`Berhasil menyimpan ${newItems.length} data pengurus ke Supabase!`, 'success');
   };
 
   const updatePengurus = (id: string, item: Partial<PengurusItem>) => {
-    setPengurusList((prev) =>
-      prev.map((p) => {
+    setPengurusList((prev) => {
+      const next = prev.map((p) => {
         if (p.id === id) {
           const updated = { ...p, ...item };
-          setDoc(doc(db, 'pengurus', id), updated).catch((err) =>
-            handleFirestoreError(err, OperationType.UPDATE, `pengurus/${id}`)
-          );
+          savePengurusToSupabase(updated);
           return updated;
         }
         return p;
-      })
-    );
-    showToast('Data pengurus berhasil diperbarui di Cloud', 'success');
+      });
+      saveItemToSupabase('pengurusList', next);
+      return next;
+    });
+    showToast('Data pengurus berhasil diperbarui di Supabase', 'success');
   };
 
   const deletePengurus = (id: string) => {
-    setPengurusList((prev) => prev.filter((p) => p.id !== id));
-    deleteDoc(doc(db, 'pengurus', id)).catch((err) =>
-      handleFirestoreError(err, OperationType.DELETE, `pengurus/${id}`)
-    );
-    showToast('Data pengurus berhasil dihapus dari Cloud', 'info');
+    setPengurusList((prev) => {
+      const next = prev.filter((p) => p.id !== id);
+      saveItemToSupabase('pengurusList', next);
+      return next;
+    });
+    deletePengurusFromSupabase(id);
+    showToast('Data pengurus berhasil dihapus dari Supabase', 'info');
   };
 
   // Program Kerja Mutations
   const addProgramKerja = (item: Omit<ProgramKerjaItem, 'id'>) => {
     const newItem: ProgramKerjaItem = { ...item, id: generateUniqueId('prog') };
-    setProgramKerjaList((prev) => [...prev, newItem]);
-    setDoc(doc(db, 'programKerja', newItem.id), newItem).catch((err) =>
-      handleFirestoreError(err, OperationType.CREATE, `programKerja/${newItem.id}`)
-    );
-    showToast('Program kerja baru berhasil disimpan ke Cloud', 'success');
+    setProgramKerjaList((prev) => {
+      const next = [...prev, newItem];
+      saveItemToSupabase('programKerjaList', next);
+      return next;
+    });
+    saveProgramKerjaToSupabase(newItem);
+    showToast('Program kerja baru berhasil disimpan ke Supabase', 'success');
   };
 
   const updateProgramKerja = (id: string, item: Partial<ProgramKerjaItem>) => {
-    setProgramKerjaList((prev) =>
-      prev.map((p) => {
+    setProgramKerjaList((prev) => {
+      const next = prev.map((p) => {
         if (p.id === id) {
           const updated = { ...p, ...item };
-          setDoc(doc(db, 'programKerja', id), updated).catch((err) =>
-            handleFirestoreError(err, OperationType.UPDATE, `programKerja/${id}`)
-          );
+          saveProgramKerjaToSupabase(updated);
           return updated;
         }
         return p;
-      })
-    );
-    showToast('Program kerja berhasil diperbarui', 'success');
+      });
+      saveItemToSupabase('programKerjaList', next);
+      return next;
+    });
+    showToast('Program kerja berhasil diperbarui di Supabase', 'success');
   };
 
   const deleteProgramKerja = (id: string) => {
-    setProgramKerjaList((prev) => prev.filter((p) => p.id !== id));
-    deleteDoc(doc(db, 'programKerja', id)).catch((err) =>
-      handleFirestoreError(err, OperationType.DELETE, `programKerja/${id}`)
-    );
-    showToast('Program kerja berhasil dihapus dari Cloud', 'info');
+    setProgramKerjaList((prev) => {
+      const next = prev.filter((p) => p.id !== id);
+      saveItemToSupabase('programKerjaList', next);
+      return next;
+    });
+    deleteProgramKerjaFromSupabase(id);
+    showToast('Program kerja berhasil dihapus dari Supabase', 'info');
   };
 
   // Kegiatan Mutations
   const addKegiatan = (item: Omit<KegiatanItem, 'id'>) => {
     const newItem: KegiatanItem = { ...item, id: generateUniqueId('keg') };
-    setKegiatanList((prev) => [newItem, ...prev]);
-    setDoc(doc(db, 'kegiatan', newItem.id), newItem).catch((err) =>
-      handleFirestoreError(err, OperationType.CREATE, `kegiatan/${newItem.id}`)
-    );
-    showToast('Dokumentasi kegiatan berhasil disimpan ke Cloud', 'success');
+    setKegiatanList((prev) => {
+      const next = [...prev, newItem];
+      saveItemToSupabase('kegiatanList', next);
+      return next;
+    });
+    saveKegiatanToSupabase(newItem);
+    showToast('Dokumentasi kegiatan berhasil disimpan ke Supabase', 'success');
   };
 
   const updateKegiatan = (id: string, item: Partial<KegiatanItem>) => {
-    setKegiatanList((prev) =>
-      prev.map((k) => {
+    setKegiatanList((prev) => {
+      const next = prev.map((k) => {
         if (k.id === id) {
           const updated = { ...k, ...item };
-          setDoc(doc(db, 'kegiatan', id), updated).catch((err) =>
-            handleFirestoreError(err, OperationType.UPDATE, `kegiatan/${id}`)
-          );
+          saveKegiatanToSupabase(updated);
           return updated;
         }
         return k;
-      })
-    );
-    showToast('Dokumentasi kegiatan berhasil diperbarui', 'success');
+      });
+      saveItemToSupabase('kegiatanList', next);
+      return next;
+    });
+    showToast('Dokumentasi kegiatan berhasil diperbarui di Supabase', 'success');
   };
 
   const deleteKegiatan = (id: string) => {
-    setKegiatanList((prev) => prev.filter((k) => k.id !== id));
-    deleteDoc(doc(db, 'kegiatan', id)).catch((err) =>
-      handleFirestoreError(err, OperationType.DELETE, `kegiatan/${id}`)
-    );
-    showToast('Dokumentasi kegiatan berhasil dihapus dari Cloud', 'info');
+    setKegiatanList((prev) => {
+      const next = prev.filter((k) => k.id !== id);
+      saveItemToSupabase('kegiatanList', next);
+      return next;
+    });
+    deleteKegiatanFromSupabase(id);
+    showToast('Dokumentasi kegiatan berhasil dihapus dari Supabase', 'info');
   };
 
   // Berita Mutations
@@ -871,35 +905,39 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
       slug: `${slug}-${Math.floor(Math.random() * 1000)}`,
       dibacaCount: 0,
     };
-    setBeritaList((prev) => [newItem, ...prev]);
-    setDoc(doc(db, 'berita', newItem.id), newItem).catch((err) =>
-      handleFirestoreError(err, OperationType.CREATE, `berita/${newItem.id}`)
-    );
-    showToast('Berita berhasil diterbitkan dan disimpan ke Cloud', 'success');
+    setBeritaList((prev) => {
+      const next = [newItem, ...prev];
+      saveItemToSupabase('beritaList', next);
+      return next;
+    });
+    saveBeritaToSupabase(newItem);
+    showToast('Berita berhasil diterbitkan dan disimpan ke Supabase', 'success');
   };
 
   const updateBerita = (id: string, item: Partial<BeritaItem>) => {
-    setBeritaList((prev) =>
-      prev.map((b) => {
+    setBeritaList((prev) => {
+      const next = prev.map((b) => {
         if (b.id === id) {
           const updated = { ...b, ...item };
-          setDoc(doc(db, 'berita', id), updated).catch((err) =>
-            handleFirestoreError(err, OperationType.UPDATE, `berita/${id}`)
-          );
+          saveBeritaToSupabase(updated);
           return updated;
         }
         return b;
-      })
-    );
-    showToast('Berita berhasil diperbarui', 'success');
+      });
+      saveItemToSupabase('beritaList', next);
+      return next;
+    });
+    showToast('Berita berhasil diperbarui di Supabase', 'success');
   };
 
   const deleteBerita = (id: string) => {
-    setBeritaList((prev) => prev.filter((b) => b.id !== id));
-    deleteDoc(doc(db, 'berita', id)).catch((err) =>
-      handleFirestoreError(err, OperationType.DELETE, `berita/${id}`)
-    );
-    showToast('Berita berhasil dihapus dari Cloud', 'info');
+    setBeritaList((prev) => {
+      const next = prev.filter((b) => b.id !== id);
+      saveItemToSupabase('beritaList', next);
+      return next;
+    });
+    deleteBeritaFromSupabase(id);
+    showToast('Berita berhasil dihapus dari Supabase', 'info');
   };
 
   const incrementBeritaViews = (id: string) => {
@@ -908,8 +946,6 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
         if (b.id === id) {
           const count = (b.dibacaCount || 0) + 1;
           const updated = { ...b, dibacaCount: count };
-          // Fire-and-forget view count update to firestore
-          setDoc(doc(db, 'berita', id), { dibacaCount: count }, { merge: true }).catch(() => {});
           return updated;
         }
         return b;
@@ -920,35 +956,39 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
   // Prestasi Mutations
   const addPrestasi = (item: Omit<PrestasiItem, 'id'>) => {
     const newItem: PrestasiItem = { ...item, id: generateUniqueId('pres') };
-    setPrestasiList((prev) => [newItem, ...prev]);
-    setDoc(doc(db, 'prestasi', newItem.id), newItem).catch((err) =>
-      handleFirestoreError(err, OperationType.CREATE, `prestasi/${newItem.id}`)
-    );
-    showToast('Prestasi baru tersimpan ke Cloud', 'success');
+    setPrestasiList((prev) => {
+      const next = [newItem, ...prev];
+      saveItemToSupabase('prestasiList', next);
+      return next;
+    });
+    savePrestasiToSupabase(newItem);
+    showToast('Prestasi baru tersimpan ke Supabase', 'success');
   };
 
   const updatePrestasi = (id: string, item: Partial<PrestasiItem>) => {
-    setPrestasiList((prev) =>
-      prev.map((p) => {
+    setPrestasiList((prev) => {
+      const next = prev.map((p) => {
         if (p.id === id) {
           const updated = { ...p, ...item };
-          setDoc(doc(db, 'prestasi', id), updated).catch((err) =>
-            handleFirestoreError(err, OperationType.UPDATE, `prestasi/${id}`)
-          );
+          savePrestasiToSupabase(updated);
           return updated;
         }
         return p;
-      })
-    );
-    showToast('Prestasi berhasil diperbarui di Cloud', 'success');
+      });
+      saveItemToSupabase('prestasiList', next);
+      return next;
+    });
+    showToast('Prestasi berhasil diperbarui di Supabase', 'success');
   };
 
   const deletePrestasi = (id: string) => {
-    setPrestasiList((prev) => prev.filter((p) => p.id !== id));
-    deleteDoc(doc(db, 'prestasi', id)).catch((err) =>
-      handleFirestoreError(err, OperationType.DELETE, `prestasi/${id}`)
-    );
-    showToast('Prestasi berhasil dihapus dari Cloud', 'info');
+    setPrestasiList((prev) => {
+      const next = prev.filter((p) => p.id !== id);
+      saveItemToSupabase('prestasiList', next);
+      return next;
+    });
+    deletePrestasiFromSupabase(id);
+    showToast('Prestasi berhasil dihapus dari Supabase', 'info');
   };
 
   // Galeri Mutations
@@ -959,103 +999,115 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
       if (match) youtubeId = match[1];
     }
     const newItem: GaleriItem = { ...item, id: generateUniqueId('gal'), youtubeId };
-    setGaleriList((prev) => [newItem, ...prev]);
-    setDoc(doc(db, 'galeri', newItem.id), newItem).catch((err) =>
-      handleFirestoreError(err, OperationType.CREATE, `galeri/${newItem.id}`)
-    );
-    showToast('Item galeri berhasil disimpan ke Cloud', 'success');
+    setGaleriList((prev) => {
+      const next = [newItem, ...prev];
+      saveItemToSupabase('galeriList', next);
+      return next;
+    });
+    saveGaleriToSupabase(newItem);
+    showToast('Item galeri berhasil disimpan ke Supabase', 'success');
   };
 
   const updateGaleri = (id: string, item: Partial<GaleriItem>) => {
-    setGaleriList((prev) =>
-      prev.map((g) => {
+    setGaleriList((prev) => {
+      const next = prev.map((g) => {
         if (g.id === id) {
           const updated = { ...g, ...item };
-          setDoc(doc(db, 'galeri', id), updated).catch((err) =>
-            handleFirestoreError(err, OperationType.UPDATE, `galeri/${id}`)
-          );
+          saveGaleriToSupabase(updated);
           return updated;
         }
         return g;
-      })
-    );
-    showToast('Item galeri berhasil diperbarui di Cloud', 'success');
+      });
+      saveItemToSupabase('galeriList', next);
+      return next;
+    });
+    showToast('Item galeri berhasil diperbarui di Supabase', 'success');
   };
 
   const deleteGaleri = (id: string) => {
-    setGaleriList((prev) => prev.filter((g) => g.id !== id));
-    deleteDoc(doc(db, 'galeri', id)).catch((err) =>
-      handleFirestoreError(err, OperationType.DELETE, `galeri/${id}`)
-    );
-    showToast('Item galeri berhasil dihapus dari Cloud', 'info');
+    setGaleriList((prev) => {
+      const next = prev.filter((g) => g.id !== id);
+      saveItemToSupabase('galeriList', next);
+      return next;
+    });
+    deleteGaleriFromSupabase(id);
+    showToast('Item galeri berhasil dihapus dari Supabase', 'info');
   };
 
   // Kalender Mutations
   const addKalender = (item: Omit<KalenderItem, 'id'>) => {
     const newItem: KalenderItem = { ...item, id: generateUniqueId('kal') };
-    setKalenderList((prev) => [...prev, newItem]);
-    setDoc(doc(db, 'kalender', newItem.id), newItem).catch((err) =>
-      handleFirestoreError(err, OperationType.CREATE, `kalender/${newItem.id}`)
-    );
-    showToast('Agenda kalender berhasil disimpan ke Cloud', 'success');
+    setKalenderList((prev) => {
+      const next = [...prev, newItem];
+      saveItemToSupabase('kalenderList', next);
+      return next;
+    });
+    saveKalenderToSupabase(newItem);
+    showToast('Agenda kalender berhasil disimpan ke Supabase', 'success');
   };
 
   const updateKalender = (id: string, item: Partial<KalenderItem>) => {
-    setKalenderList((prev) =>
-      prev.map((k) => {
+    setKalenderList((prev) => {
+      const next = prev.map((k) => {
         if (k.id === id) {
           const updated = { ...k, ...item };
-          setDoc(doc(db, 'kalender', id), updated).catch((err) =>
-            handleFirestoreError(err, OperationType.UPDATE, `kalender/${id}`)
-          );
+          saveKalenderToSupabase(updated);
           return updated;
         }
         return k;
-      })
-    );
-    showToast('Agenda kegiatan berhasil diperbarui di Cloud', 'success');
+      });
+      saveItemToSupabase('kalenderList', next);
+      return next;
+    });
+    showToast('Agenda kegiatan berhasil diperbarui di Supabase', 'success');
   };
 
   const deleteKalender = (id: string) => {
-    setKalenderList((prev) => prev.filter((k) => k.id !== id));
-    deleteDoc(doc(db, 'kalender', id)).catch((err) =>
-      handleFirestoreError(err, OperationType.DELETE, `kalender/${id}`)
-    );
-    showToast('Agenda kegiatan berhasil dihapus dari Cloud', 'info');
+    setKalenderList((prev) => {
+      const next = prev.filter((k) => k.id !== id);
+      saveItemToSupabase('kalenderList', next);
+      return next;
+    });
+    deleteKalenderFromSupabase(id);
+    showToast('Agenda kegiatan berhasil dihapus dari Supabase', 'info');
   };
 
   // Layanan Mutations
   const addLayanan = (item: Omit<LayananItem, 'id'>) => {
     const newItem: LayananItem = { ...item, id: generateUniqueId('lay') };
-    setLayananList((prev) => [...prev, newItem]);
-    setDoc(doc(db, 'layanan', newItem.id), newItem).catch((err) =>
-      handleFirestoreError(err, OperationType.CREATE, `layanan/${newItem.id}`)
-    );
-    showToast('Layanan organisasi berhasil disimpan ke Cloud', 'success');
+    setLayananList((prev) => {
+      const next = [...prev, newItem];
+      saveItemToSupabase('layananList', next);
+      return next;
+    });
+    saveLayananToSupabase(newItem);
+    showToast('Layanan organisasi berhasil disimpan ke Supabase', 'success');
   };
 
   const updateLayanan = (id: string, item: Partial<LayananItem>) => {
-    setLayananList((prev) =>
-      prev.map((l) => {
+    setLayananList((prev) => {
+      const next = prev.map((l) => {
         if (l.id === id) {
           const updated = { ...l, ...item };
-          setDoc(doc(db, 'layanan', id), updated).catch((err) =>
-            handleFirestoreError(err, OperationType.UPDATE, `layanan/${id}`)
-          );
+          saveLayananToSupabase(updated);
           return updated;
         }
         return l;
-      })
-    );
-    showToast('Layanan organisasi berhasil diperbarui di Cloud', 'success');
+      });
+      saveItemToSupabase('layananList', next);
+      return next;
+    });
+    showToast('Layanan organisasi berhasil diperbarui di Supabase', 'success');
   };
 
   const deleteLayanan = (id: string) => {
-    setLayananList((prev) => prev.filter((l) => l.id !== id));
-    deleteDoc(doc(db, 'layanan', id)).catch((err) =>
-      handleFirestoreError(err, OperationType.DELETE, `layanan/${id}`)
-    );
-    showToast('Layanan organisasi berhasil dihapus dari Cloud', 'info');
+    setLayananList((prev) => {
+      const next = prev.filter((l) => l.id !== id);
+      saveItemToSupabase('layananList', next);
+      return next;
+    });
+    deleteLayananFromSupabase(id);
+    showToast('Layanan organisasi berhasil dihapus dari Supabase', 'info');
   };
 
   // Pendaftaran (Member Registration Submission)
@@ -1075,40 +1127,47 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
       catatanAdmin: 'Berkas baru masuk, menunggu pemeriksaan pengurus cabang.',
     };
 
-    setPendaftaranList((prev) => [newItem, ...prev]);
-    setDoc(doc(db, 'pendaftaran', newItem.id), newItem).catch((err) =>
-      handleFirestoreError(err, OperationType.CREATE, `pendaftaran/${newItem.id}`)
-    );
-    showToast('Pendaftaran berhasil dikirim! Tersimpan di Cloud.', 'success');
+    setPendaftaranList((prev) => {
+      const next = [newItem, ...prev];
+      saveItemToSupabase('pendaftaranList', next);
+      return next;
+    });
+
+    // Save to Supabase dedicated table
+    savePendaftaranToSupabase(newItem);
+
+    showToast('Pendaftaran berhasil dikirim! Data tersimpan di Supabase.', 'success');
     return nomorPendaftaran;
   };
 
   const updatePendaftaranStatus = (id: string, status: PendaftaranItem['status'], catatan?: string) => {
-    setPendaftaranList((prev) =>
-      prev.map((p) => {
+    setPendaftaranList((prev) => {
+      const next = prev.map((p) => {
         if (p.id === id) {
           const updated = {
             ...p,
             status,
             ...(catatan !== undefined ? { catatanAdmin: catatan } : {}),
           };
-          setDoc(doc(db, 'pendaftaran', id), updated).catch((err) =>
-            handleFirestoreError(err, OperationType.UPDATE, `pendaftaran/${id}`)
-          );
+          savePendaftaranToSupabase(updated);
           return updated;
         }
         return p;
-      })
-    );
+      });
+      saveItemToSupabase('pendaftaranList', next);
+      return next;
+    });
     showToast(`Status pendaftaran berhasil diperbarui: ${status}`, 'success');
   };
 
   const deletePendaftaran = (id: string) => {
-    setPendaftaranList((prev) => prev.filter((p) => p.id !== id));
-    deleteDoc(doc(db, 'pendaftaran', id)).catch((err) =>
-      handleFirestoreError(err, OperationType.DELETE, `pendaftaran/${id}`)
-    );
-    showToast('Data pendaftaran berhasil dihapus dari Cloud', 'info');
+    setPendaftaranList((prev) => {
+      const next = prev.filter((p) => p.id !== id);
+      saveItemToSupabase('pendaftaranList', next);
+      return next;
+    });
+    deletePendaftaranFromSupabase(id);
+    showToast('Data pendaftaran berhasil dihapus dari Supabase', 'info');
   };
 
   // Aspirasi (Public Aspirations)
@@ -1129,64 +1188,64 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
       tanggalRespon: today,
     };
 
-    setAspirasiList((prev) => [newItem, ...prev]);
-    setDoc(doc(db, 'aspirasi', newItem.id), newItem).catch((err) =>
-      handleFirestoreError(err, OperationType.CREATE, `aspirasi/${newItem.id}`)
-    );
+    setAspirasiList((prev) => {
+      const next = [newItem, ...prev];
+      saveItemToSupabase('aspirasiList', next);
+      return next;
+    });
+    saveAspirasiToSupabase(newItem);
     showToast(`Aspirasi berhasil dikirim! Nomor Tiket Anda: ${tiketId}`, 'success');
     return tiketId;
   };
 
   const updateAspirasiStatus = (id: string, status: AspirasiItem['status'], responAdmin?: string) => {
     const today = new Date().toISOString().split('T')[0];
-    setAspirasiList((prev) =>
-      prev.map((a) => {
+    setAspirasiList((prev) => {
+      const next = prev.map((a) => {
         if (a.id === id) {
           const updated = {
             ...a,
             status,
             ...(responAdmin !== undefined ? { responAdmin, tanggalRespon: today } : {}),
           };
-          setDoc(doc(db, 'aspirasi', id), updated).catch((err) =>
-            handleFirestoreError(err, OperationType.UPDATE, `aspirasi/${id}`)
-          );
+          saveAspirasiToSupabase(updated);
           return updated;
         }
         return a;
-      })
-    );
+      });
+      saveItemToSupabase('aspirasiList', next);
+      return next;
+    });
     showToast(`Status aspirasi berhasil diperbarui: ${status}`, 'success');
   };
 
   const deleteAspirasi = (id: string) => {
-    setAspirasiList((prev) => prev.filter((a) => a.id !== id));
-    deleteDoc(doc(db, 'aspirasi', id)).catch((err) =>
-      handleFirestoreError(err, OperationType.DELETE, `aspirasi/${id}`)
-    );
-    showToast('Data aspirasi berhasil dihapus dari Cloud', 'info');
+    setAspirasiList((prev) => {
+      const next = prev.filter((a) => a.id !== id);
+      saveItemToSupabase('aspirasiList', next);
+      return next;
+    });
+    deleteAspirasiFromSupabase(id);
+    showToast('Data aspirasi berhasil dihapus dari Supabase', 'info');
   };
 
   // Social & Settings Mutations
   const updateSocialMedia = (data: Partial<SocialMediaLinks>) => {
     setSocialMedia((prev) => {
       const updated = { ...prev, ...data };
-      setDoc(doc(db, 'settings', 'socialMedia'), updated).catch((err) =>
-        handleFirestoreError(err, OperationType.UPDATE, 'settings/socialMedia')
-      );
+      saveItemToSupabase('socialMedia', updated);
       return updated;
     });
-    showToast('Tautan media sosial berhasil disimpan ke Cloud', 'success');
+    showToast('Tautan media sosial berhasil disimpan ke Supabase', 'success');
   };
 
   const updateSiteSettings = (data: Partial<SiteSettings>) => {
     setSiteSettings((prev) => {
       const updated = { ...prev, ...data };
-      setDoc(doc(db, 'settings', 'siteSettings'), updated).catch((err) =>
-        handleFirestoreError(err, OperationType.UPDATE, 'settings/siteSettings')
-      );
+      saveItemToSupabase('siteSettings', updated);
       return updated;
     });
-    showToast('Pengaturan website berhasil disimpan ke Cloud', 'success');
+    showToast('Pengaturan website berhasil disimpan ke Supabase', 'success');
   };
 
   // Reset & Backup
@@ -1229,33 +1288,32 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
       aspirasiList,
       socialMedia,
       siteSettings,
-      exportedAt: new Date().toISOString(),
     };
     return JSON.stringify(data, null, 2);
   };
 
-  const importDataJSON = (jsonString: string) => {
+  const importDataJSON = (jsonString: string): boolean => {
     try {
-      const parsed = JSON.parse(jsonString);
-      if (parsed.profile) setProfile({ ...initialProfile, ...parsed.profile });
-      if (parsed.sejarahList) setSejarahList(deduplicateItems(parsed.sejarahList, 'sej'));
-      if (parsed.visiMisi) setVisiMisi(parsed.visiMisi);
-      if (parsed.pengurusList) setPengurusList(deduplicateItems(parsed.pengurusList, 'peng'));
-      if (parsed.programKerjaList) setProgramKerjaList(deduplicateItems(parsed.programKerjaList, 'prog'));
-      if (parsed.kegiatanList) setKegiatanList(deduplicateItems(parsed.kegiatanList, 'keg'));
-      if (parsed.beritaList) setBeritaList(deduplicateItems(parsed.beritaList, 'ber'));
-      if (parsed.prestasiList) setPrestasiList(deduplicateItems(parsed.prestasiList, 'pres'));
-      if (parsed.galeriList) setGaleriList(deduplicateItems(parsed.galeriList, 'gal'));
-      if (parsed.kalenderList) setKalenderList(deduplicateItems(parsed.kalenderList, 'kal'));
-      if (parsed.layananList) setLayananList(deduplicateItems(parsed.layananList, 'lay'));
-      if (parsed.pendaftaranList) setPendaftaranList(deduplicateItems(parsed.pendaftaranList, 'pend'));
-      if (parsed.aspirasiList) setAspirasiList(deduplicateItems(parsed.aspirasiList, 'asp'));
-      if (parsed.socialMedia) setSocialMedia(parsed.socialMedia);
-      if (parsed.siteSettings) setSiteSettings(parsed.siteSettings);
-      showToast('Data berhasil diimpor! Silakan klik Sinkronkan ke Cloud.', 'success');
+      const data = JSON.parse(jsonString);
+      if (data.profile) setProfile(data.profile);
+      if (data.sejarahList) setSejarahList(data.sejarahList);
+      if (data.visiMisi) setVisiMisi(data.visiMisi);
+      if (data.pengurusList) setPengurusList(data.pengurusList);
+      if (data.programKerjaList) setProgramKerjaList(data.programKerjaList);
+      if (data.kegiatanList) setKegiatanList(data.kegiatanList);
+      if (data.beritaList) setBeritaList(data.beritaList);
+      if (data.prestasiList) setPrestasiList(data.prestasiList);
+      if (data.galeriList) setGaleriList(data.galeriList);
+      if (data.kalenderList) setKalenderList(data.kalenderList);
+      if (data.layananList) setLayananList(data.layananList);
+      if (data.pendaftaranList) setPendaftaranList(data.pendaftaranList);
+      if (data.aspirasiList) setAspirasiList(data.aspirasiList);
+      if (data.socialMedia) setSocialMedia(data.socialMedia);
+      if (data.siteSettings) setSiteSettings(data.siteSettings);
+      showToast('Data cadangan berhasil diimpor ke aplikasi!', 'success');
       return true;
-    } catch (e) {
-      showToast('Format berkas JSON tidak valid!', 'error');
+    } catch {
+      showToast('Format berkas cadangan JSON tidak valid', 'error');
       return false;
     }
   };
@@ -1279,9 +1337,9 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
         socialMedia,
         siteSettings,
         isAdminLoggedIn,
-        adminUser,
-        isCloudConnected,
-        isSyncingCloud,
+        adminUser: supabaseUser,
+        isCloudConnected: supabaseStatus.connected,
+        isSyncingCloud: isSyncingSupabase,
         toasts,
         loginAdmin,
         loginAdminWithGoogle,
@@ -1332,6 +1390,18 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
         resetToDefaults,
         exportDataJSON,
         importDataJSON,
+        supabaseUser,
+        isMemberAuthModalOpen,
+        memberAuthDefaultTab,
+        openMemberAuthModal,
+        closeMemberAuthModal,
+        loginMemberWithSupabase,
+        registerMemberWithSupabase,
+        logoutMemberWithSupabase,
+        supabaseStatus,
+        isSyncingSupabase,
+        checkSupabaseStatus,
+        syncAllToSupabase,
       }}
     >
       {children}

@@ -4,6 +4,7 @@ import React, { useState, useRef } from 'react';
 import Image from 'next/image';
 import { usePgriStore } from '@/lib/store';
 import { SejarahItem } from '@/lib/types';
+import { DeleteConfirmationModal } from './DeleteConfirmationModal';
 import {
   History,
   Plus,
@@ -22,6 +23,7 @@ export function AdminSejarahTab() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SejarahItem | null>(null);
 
   // New item form state
   const [formData, setFormData] = useState({
@@ -250,23 +252,41 @@ export function AdminSejarahTab() {
           </div>
         </div>
 
-        <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
-          {editingId && (
+        <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-200">
+          {editingId ? (
             <button
               type="button"
-              onClick={cancelEdit}
-              className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-semibold text-xs"
+              onClick={() => {
+                const item = sejarahList.find((s) => s.id === editingId);
+                if (item) setDeleteTarget(item);
+              }}
+              className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl font-semibold text-xs flex items-center gap-1.5 cursor-pointer"
             >
-              Batal
+              <Trash2 className="h-3.5 w-3.5" />
+              <span>Hapus Tonggak Ini</span>
             </button>
+          ) : (
+            <div />
           )}
-          <button
-            type="submit"
-            className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-sm"
-          >
-            {editingId ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-            <span>{editingId ? 'Simpan Perubahan' : 'Tambahkan ke Garis Waktu'}</span>
-          </button>
+
+          <div className="flex items-center gap-2">
+            {editingId && (
+              <button
+                type="button"
+                onClick={cancelEdit}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-semibold text-xs cursor-pointer"
+              >
+                Batal
+              </button>
+            )}
+            <button
+              type="submit"
+              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
+            >
+              {editingId ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+              <span>{editingId ? 'Simpan Perubahan' : 'Tambahkan ke Garis Waktu'}</span>
+            </button>
+          </div>
         </div>
       </form>
 
@@ -316,13 +336,9 @@ export function AdminSejarahTab() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    if (confirm(`Hapus sejarah "${item.judul}"?`)) {
-                      deleteSejarah(item.id);
-                      showToast('Tonggak sejarah berhasil dihapus!', 'info');
-                    }
-                  }}
-                  className="px-2.5 py-1 text-xs text-teal-600 hover:bg-teal-50 rounded-lg font-semibold flex items-center gap-1"
+                  onClick={() => setDeleteTarget(item)}
+                  className="px-2.5 py-1 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-rose-200/80 rounded-lg font-semibold flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
+                  title="Hapus Tonggak Sejarah"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                   <span>Hapus</span>
@@ -332,6 +348,22 @@ export function AdminSejarahTab() {
           ))}
         </div>
       </div>
+
+      {/* MODAL VERIFIKASI HAPUS SEJARAH */}
+      <DeleteConfirmationModal
+        isOpen={!!deleteTarget}
+        title="Hapus Peristiwa Sejarah?"
+        itemName={deleteTarget ? `Tahun ${deleteTarget.tahun} - ${deleteTarget.judul}` : ''}
+        itemType="Sejarah"
+        description="Data peristiwa sejarah ini akan dihapus permanen dari linimasa sejarah PGRI Pasirwangi dan basis data Supabase."
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) {
+            deleteSejarah(deleteTarget.id);
+            setDeleteTarget(null);
+          }
+        }}
+      />
     </div>
   );
 }

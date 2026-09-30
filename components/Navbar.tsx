@@ -24,7 +24,7 @@ interface NavbarProps {
 }
 
 export function Navbar({ onOpenSearch, onOpenAdmin }: NavbarProps) {
-  const { isAdminLoggedIn, siteSettings, profile } = usePgriStore();
+  const { isAdminLoggedIn, siteSettings, profile, supabaseUser, openMemberAuthModal } = usePgriStore();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const [moreDropdownOpen, setMoreDropdownOpen] = useState(false);
@@ -153,11 +153,30 @@ export function Navbar({ onOpenSearch, onOpenAdmin }: NavbarProps) {
                 <Search className="h-5 w-5" />
               </button>
 
+              {/* Member Portal Button (Supabase Auth) */}
+              <button
+                type="button"
+                onClick={() => openMemberAuthModal('login')}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer ${
+                  supabaseUser
+                    ? 'bg-emerald-50 text-emerald-900 border-emerald-300 hover:bg-emerald-100 shadow-xs'
+                    : 'text-slate-700 bg-slate-50 border-slate-200 hover:bg-slate-100 hover:text-emerald-700'
+                }`}
+                title={supabaseUser ? 'Lihat Akun & Status Keanggotaan' : 'Masuk atau Daftar Akun Guru (Supabase)'}
+              >
+                <UserCheck className="h-3.5 w-3.5 text-emerald-600" />
+                <span className="hidden sm:inline max-w-[110px] truncate">
+                  {supabaseUser
+                    ? (supabaseUser.user_metadata?.full_name?.split(' ')[0] || 'Akun Saya')
+                    : 'Masuk Guru'}
+                </span>
+              </button>
+
               {/* Admin Portal Button */}
               <button
                 type="button"
                 onClick={onOpenAdmin}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors cursor-pointer ${
                   isAdminLoggedIn
                     ? 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
                     : 'text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-900'
@@ -228,6 +247,22 @@ export function Navbar({ onOpenSearch, onOpenAdmin }: NavbarProps) {
             })}
 
             <div className="pt-4 border-t border-slate-100 mt-2 space-y-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  openMemberAuthModal('login');
+                }}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-50 text-emerald-800 border border-emerald-200 font-semibold text-xs sm:text-sm rounded-lg"
+              >
+                <UserCheck className="h-4 w-4 text-emerald-600" />
+                <span>
+                  {supabaseUser
+                    ? `Akun Guru (${supabaseUser.user_metadata?.full_name || supabaseUser.email})`
+                    : 'Masuk / Daftar Akun Guru (Supabase)'}
+                </span>
+              </button>
+
               <a
                 href="#pendaftaran-pgri"
                 onClick={() => setMobileMenuOpen(false)}

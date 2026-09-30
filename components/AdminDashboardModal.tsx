@@ -36,7 +36,10 @@ import {
   Camera,
   Cloud,
   RefreshCw,
+  Copy,
+  ExternalLink,
 } from 'lucide-react';
+import { SUPABASE_COMPLETE_SQL, SUPABASE_URL } from '@/lib/supabase';
 import { KetuaFotoUploader } from './admin/KetuaFotoUploader';
 import { LogoBrandingSettings } from './admin/LogoBrandingSettings';
 import { AdminPengurusTab } from './admin/AdminPengurusTab';
@@ -47,6 +50,7 @@ import { AdminPrestasiTab } from './admin/AdminPrestasiTab';
 import { AdminGaleriTab } from './admin/AdminGaleriTab';
 import { AdminKalenderTab } from './admin/AdminKalenderTab';
 import { AdminLayananTab } from './admin/AdminLayananTab';
+import { DeleteConfirmationModal } from './admin/DeleteConfirmationModal';
 
 interface AdminDashboardModalProps {
   isOpen: boolean;
@@ -107,14 +111,46 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
     importDataJSON,
     showToast,
     adminUser,
-    isSyncingCloud,
-    syncAllToFirestore,
-    loginAdminWithGoogle,
+    supabaseStatus,
+    isSyncingSupabase,
+    checkSupabaseStatus,
+    syncAllToSupabase,
+    loginMemberWithSupabase,
   } = store;
 
   // Login form state
   const [passwordInput, setPasswordInput] = useState('');
   const [activeTab, setActiveTab] = useState<string>('overview');
+  const [copiedSql, setCopiedSql] = useState(false);
+
+  // Global Delete Verification Modal State
+  const [deleteConfirmState, setDeleteConfirmState] = useState<{
+    isOpen: boolean;
+    title: string;
+    itemName: string;
+    itemType: string;
+    description?: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    itemName: '',
+    itemType: '',
+    onConfirm: () => {},
+  });
+
+  const requestDelete = (config: {
+    title: string;
+    itemName: string;
+    itemType: string;
+    description?: string;
+    onConfirm: () => void;
+  }) => {
+    setDeleteConfirmState({
+      isOpen: true,
+      ...config,
+    });
+  };
 
   // Form states for adding items
   const [newProgram, setNewProgram] = useState({
@@ -209,6 +245,7 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
     { key: 'pendaftaran', label: 'Pendaftaran Masuk', icon: FileEdit, badge: pendaftaranList.filter(p => p.status === 'Baru').length },
     { key: 'aspirasi', label: 'Aspirasi Anggota', icon: MessageSquareQuote, badge: aspirasiList.filter(a => a.status === 'Diterima').length },
     { key: 'medsos', label: 'Media Sosial & Kontak', icon: Share2 },
+    { key: 'supabase', label: 'Database Supabase', icon: Database, badge: supabaseStatus.connected ? 'Aktif' : 'Atur' },
     { key: 'backup', label: 'Cadangan & Pemulihan', icon: Database },
   ];
 
@@ -236,30 +273,22 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => syncAllToFirestore()}
-                  disabled={isSyncingCloud}
+                  onClick={() => syncAllToSupabase()}
+                  disabled={isSyncingSupabase}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-300 hover:text-white bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-700/60 rounded-xl transition-all shadow-sm disabled:opacity-50"
-                  title="Sinkronkan semua data saat ini ke Cloud Firestore"
+                  title="Sinkronkan seluruh data saat ini ke Database Supabase"
                 >
-                  <RefreshCw className={`h-3.5 w-3.5 ${isSyncingCloud ? 'animate-spin' : ''}`} />
+                  <RefreshCw className={`h-3.5 w-3.5 ${isSyncingSupabase ? 'animate-spin' : ''}`} />
                   <span className="hidden sm:inline">
-                    {isSyncingCloud ? 'Menyinkronkan...' : 'Sinkron ke Cloud'}
+                    {isSyncingSupabase ? 'Menyinkronkan...' : 'Sinkron Supabase'}
                   </span>
                 </button>
 
-                {adminUser ? (
+                {adminUser && (
                   <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-[11px] text-emerald-400 font-medium">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
                     <span className="max-w-[140px] truncate">{adminUser.email}</span>
                   </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => loginAdminWithGoogle()}
-                    className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-xl text-[11px] text-amber-300 font-medium transition-colors"
-                  >
-                    <span>Hubungkan Google</span>
-                  </button>
                 )}
 
                 <button
@@ -295,31 +324,10 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
                 Masuk Dashboard Admin
               </h3>
               <p className="text-xs text-slate-500 mt-1 mb-6">
-                Akses panel pengelolaan data PGRI Pasirwangi untuk memperbarui data di Cloud Firestore secara permanen.
+                Akses panel pengelolaan data PGRI Pasirwangi untuk memperbarui data di Database Supabase secara permanen.
               </p>
 
               <div className="space-y-4">
-                {/* Google Sign In Button */}
-                <button
-                  type="button"
-                  onClick={() => loginAdminWithGoogle()}
-                  className="w-full py-3 px-4 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center justify-center gap-2.5 border border-slate-700 hover:shadow-lg cursor-pointer"
-                >
-                  <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                  </svg>
-                  <span>Masuk dengan Google (Akun Pengurus)</span>
-                </button>
-
-                <div className="flex items-center gap-3">
-                  <div className="flex-1 h-px bg-slate-200"></div>
-                  <span className="text-[11px] text-slate-400 font-medium">atau masuk dengan sandi</span>
-                  <div className="flex-1 h-px bg-slate-200"></div>
-                </div>
-
                 <form onSubmit={handleLogin} className="space-y-4 text-left">
                   <div>
                     <label className="text-xs font-semibold text-slate-700 block mb-1">
@@ -373,7 +381,7 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
                         <Icon className="h-4 w-4" />
                         <span>{item.label}</span>
                       </div>
-                      {Boolean(item.badge && item.badge > 0) && (
+                      {item.badge !== undefined && item.badge !== null && item.badge !== 0 && (
                         <span
                           className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
                             isActive ? 'bg-white text-emerald-700' : 'bg-emerald-100 text-emerald-700'
@@ -473,32 +481,32 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                       <div className="flex items-start gap-3">
                         <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-md">
-                          <Cloud className="w-5 h-5" />
+                          <Database className="w-5 h-5" />
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
                             <h4 className="text-sm font-bold text-slate-900">
-                              Database Cloud Firestore Aktif
+                              Database Supabase Cloud Aktif
                             </h4>
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                              Tersambung
+                              {supabaseStatus.connected ? 'Tersambung' : 'Siap'}
                             </span>
                           </div>
                           <p className="text-xs text-slate-600 mt-1 max-w-xl">
-                            Seluruh data tersimpan secara terpusat di Google Cloud Firestore. Setiap perubahan yang Anda simpan akan langsung terlihat oleh semua pengunjung dan pengguna di perangkat apa pun secara permanen (tidak akan kembali ke bawaan sistem).
+                            Seluruh data tersimpan secara terpusat di Database PostgreSQL Supabase. Setiap perubahan yang Anda simpan akan langsung disinkronkan secara permanen untuk seluruh pengunjung dan pengurus.
                           </p>
                         </div>
                       </div>
 
                       <button
                         type="button"
-                        onClick={() => syncAllToFirestore()}
-                        disabled={isSyncingCloud}
+                        onClick={() => syncAllToSupabase()}
+                        disabled={isSyncingSupabase}
                         className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl shadow-md transition-all shrink-0 cursor-pointer disabled:opacity-50"
                       >
-                        <RefreshCw className={`w-4 h-4 ${isSyncingCloud ? 'animate-spin' : ''}`} />
-                        <span>{isSyncingCloud ? 'Menyinkronkan...' : 'Sinkronkan Data ke Cloud'}</span>
+                        <RefreshCw className={`w-4 h-4 ${isSyncingSupabase ? 'animate-spin' : ''}`} />
+                        <span>{isSyncingSupabase ? 'Menyinkronkan...' : 'Sinkronkan ke Supabase'}</span>
                       </button>
                     </div>
                   </div>
@@ -811,10 +819,24 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
                           </button>
                           <button
                             type="button"
-                            onClick={() => deleteProgramKerja(prg.id)}
-                            className="p-1 text-teal-600 hover:bg-teal-50 rounded"
+                            onClick={() =>
+                              requestDelete({
+                                title: 'Hapus Program Kerja?',
+                                itemName: `${prg.nama} (${prg.bidang})`,
+                                itemType: 'Program Kerja',
+                                description:
+                                  'Program kerja ini akan dihapus dari rencana operasional dan basis data Supabase.',
+                                onConfirm: () => {
+                                  deleteProgramKerja(prg.id);
+                                  setDeleteConfirmState((prev) => ({ ...prev, isOpen: false }));
+                                },
+                              })
+                            }
+                            className="px-2.5 py-1 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-rose-200/80 rounded-lg font-semibold flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
+                            title="Hapus Program Kerja"
                           >
-                            <Trash2 className="h-4 w-4" />
+                            <Trash2 className="h-3.5 w-3.5" />
+                            <span>Hapus</span>
                           </button>
                         </div>
                       </div>
@@ -893,10 +915,24 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
                         </div>
                         <button
                           type="button"
-                          onClick={() => deleteBerita(b.id)}
-                          className="p-1 text-teal-600 hover:bg-teal-50 rounded"
+                          onClick={() =>
+                            requestDelete({
+                              title: 'Hapus Warta Berita?',
+                              itemName: b.judul,
+                              itemType: 'Berita',
+                              description:
+                                'Berita ini akan dihapus permanen dari portal warta organisasi dan basis data Supabase.',
+                              onConfirm: () => {
+                                deleteBerita(b.id);
+                                setDeleteConfirmState((prev) => ({ ...prev, isOpen: false }));
+                              },
+                            })
+                          }
+                          className="px-2.5 py-1 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-rose-200/80 rounded-lg font-semibold flex items-center gap-1 cursor-pointer transition-all shadow-2xs shrink-0"
+                          title="Hapus Berita"
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="h-3.5 w-3.5" />
+                          <span>Hapus</span>
                         </button>
                       </div>
                     ))}
@@ -962,11 +998,24 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
 
                             <button
                               type="button"
-                              onClick={() => deletePendaftaran(p.id)}
-                              className="p-1 text-slate-400 hover:text-teal-600 rounded"
-                              title="Hapus berkas"
+                              onClick={() =>
+                                requestDelete({
+                                  title: 'Hapus Berkas Pendaftaran?',
+                                  itemName: `${p.nomorPendaftaran} - ${p.namaLengkap} (${p.instansi})`,
+                                  itemType: 'Pendaftaran',
+                                  description:
+                                    'Berkas pendaftaran anggota ini akan dihapus permanen dari antrean dan basis data Supabase.',
+                                  onConfirm: () => {
+                                    deletePendaftaran(p.id);
+                                    setDeleteConfirmState((prev) => ({ ...prev, isOpen: false }));
+                                  },
+                                })
+                              }
+                              className="px-2.5 py-1 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-rose-200/80 rounded-lg font-semibold flex items-center gap-1 cursor-pointer transition-all shadow-2xs shrink-0"
+                              title="Hapus berkas pendaftaran"
                             >
-                              <Trash2 className="h-4 w-4" />
+                              <Trash2 className="h-3.5 w-3.5" />
+                              <span>Hapus</span>
                             </button>
                           </div>
                         </div>
@@ -1094,10 +1143,24 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
 
                             <button
                               type="button"
-                              onClick={() => deleteAspirasi(asp.id)}
-                              className="p-1 text-slate-400 hover:text-teal-600 rounded"
+                              onClick={() =>
+                                requestDelete({
+                                  title: 'Hapus Tiket Aspirasi?',
+                                  itemName: `${asp.tiketId} - ${asp.judul}`,
+                                  itemType: 'Aspirasi',
+                                  description:
+                                    'Data aspirasi/masukan guru ini akan dihapus permanen dari sistem dan basis data Supabase.',
+                                  onConfirm: () => {
+                                    deleteAspirasi(asp.id);
+                                    setDeleteConfirmState((prev) => ({ ...prev, isOpen: false }));
+                                  },
+                                })
+                              }
+                              className="px-2.5 py-1 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-rose-200/80 rounded-lg font-semibold flex items-center gap-1 cursor-pointer transition-all shadow-2xs shrink-0"
+                              title="Hapus aspirasi"
                             >
-                              <Trash2 className="h-4 w-4" />
+                              <Trash2 className="h-3.5 w-3.5" />
+                              <span>Hapus</span>
                             </button>
                           </div>
                         </div>
@@ -1250,6 +1313,210 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
                 </div>
               )}
 
+              {/* Tab: Database Supabase */}
+              {activeTab === 'supabase' && (
+                <div className="space-y-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                        <Database className="w-5 h-5 text-emerald-600" />
+                        <span>Integrasi Database Supabase</span>
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Kelola sinkronisasi data dan basis data PostgreSQL Supabase untuk Portal PGRI Pasirwangi.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={checkSupabaseStatus}
+                        disabled={supabaseStatus.checking}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${supabaseStatus.checking ? 'animate-spin' : ''}`} />
+                        <span>{supabaseStatus.checking ? 'Memeriksa...' : 'Uji Koneksi'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={syncAllToSupabase}
+                        disabled={isSyncingSupabase}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-sm transition-all cursor-pointer disabled:opacity-50"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSupabase ? 'animate-spin' : ''}`} />
+                        <span>{isSyncingSupabase ? 'Menyinkronkan...' : 'Sinkronkan Semua Data'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Kredensial & Status Koneksi Card */}
+                  <div className="p-5 rounded-2xl bg-gradient-to-br from-slate-900 to-slate-800 text-white shadow-md space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-700/80 pb-3">
+                      <div>
+                        <div className="text-[11px] text-emerald-400 font-semibold uppercase tracking-wider">
+                          Proyek Supabase Terhubung
+                        </div>
+                        <div className="text-base font-bold text-white mt-0.5">
+                          Portal SIM PGRI Cabang Kecamatan Pasirwangi
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${
+                            supabaseStatus.connected
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                              : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                          }`}
+                        >
+                          <span
+                            className={`w-2 h-2 rounded-full ${
+                              supabaseStatus.connected ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'
+                            }`}
+                          ></span>
+                          {supabaseStatus.connected ? 'Server Terhubung' : 'Terputus'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                      <div className="bg-slate-800/80 p-3 rounded-xl border border-slate-700">
+                        <span className="text-slate-400 block text-[10px] uppercase font-semibold">Project ID</span>
+                        <span className="font-mono text-emerald-300 font-medium">vokxvtbijnubrzbdazxs</span>
+                      </div>
+                      <div className="bg-slate-800/80 p-3 rounded-xl border border-slate-700">
+                        <span className="text-slate-400 block text-[10px] uppercase font-semibold">Status Tabel Database</span>
+                        <span
+                          className={`font-semibold ${
+                            (supabaseStatus.totalTablesReady ?? 0) > 0 ? 'text-emerald-400' : 'text-amber-400'
+                          }`}
+                        >
+                          {supabaseStatus.totalTablesReady ?? (supabaseStatus.connected ? 14 : 0)} / 14 Tabel Siap
+                        </span>
+                      </div>
+                      <div className="bg-slate-800/80 p-3 rounded-xl border border-slate-700">
+                        <span className="text-slate-400 block text-[10px] uppercase font-semibold">Mode Sinkronisasi</span>
+                        <span className="font-semibold text-emerald-400">
+                          Otomatis Realtime (CRUD)
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Rincian 14 Tabel Menu Sidebar */}
+                    <div className="bg-slate-800/60 p-3.5 rounded-xl border border-slate-700/80">
+                      <div className="text-[11px] font-bold text-slate-300 mb-2 uppercase tracking-wide">
+                        Status Tabel untuk Seluruh Menu Admin:
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                        {[
+                          { name: 'pgri_profil', label: 'Profil & Statistik' },
+                          { name: 'pgri_sejarah', label: 'Sejarah' },
+                          { name: 'pgri_visi_misi', label: 'Visi & Misi' },
+                          { name: 'pgri_pengurus', label: 'Pengurus' },
+                          { name: 'pgri_program_kerja', label: 'Program Kerja' },
+                          { name: 'pgri_kegiatan', label: 'Kegiatan' },
+                          { name: 'pgri_berita', label: 'Berita' },
+                          { name: 'pgri_prestasi', label: 'Prestasi' },
+                          { name: 'pgri_galeri', label: 'Galeri' },
+                          { name: 'pgri_kalender', label: 'Kalender' },
+                          { name: 'pgri_layanan', label: 'Layanan' },
+                          { name: 'pgri_aspirasi', label: 'Aspirasi' },
+                          { name: 'pgri_pendaftaran', label: 'Pendaftaran' },
+                          { name: 'pgri_store', label: 'Cadangan Store' },
+                        ].map((tbl) => {
+                          const isReady = supabaseStatus.tableDetails?.[tbl.name] ?? supabaseStatus.connected;
+                          return (
+                            <div
+                              key={tbl.name}
+                              className="flex items-center justify-between p-1.5 px-2 rounded-lg bg-slate-900/60 border border-slate-700/60"
+                            >
+                              <span className="text-slate-300 truncate" title={tbl.name}>
+                                {tbl.label}
+                              </span>
+                              <span
+                                className={`text-[10px] font-bold ml-1 ${
+                                  isReady ? 'text-emerald-400' : 'text-amber-400'
+                                }`}
+                              >
+                                {isReady ? '✓' : '...'}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="text-xs text-slate-300 bg-slate-800/50 p-3 rounded-xl border border-slate-700/60">
+                      <strong>Status:</strong> {supabaseStatus.message}
+                    </div>
+                  </div>
+
+                  {/* Panduan & Skrip SQL Supabase */}
+                  <div className="p-5 rounded-2xl border border-emerald-200 bg-emerald-50/50 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <h4 className="font-bold text-slate-900 text-sm">
+                          Skrip Pembuatan Tabel Basis Data Supabase
+                        </h4>
+                        <p className="text-xs text-slate-600 mt-0.5">
+                          Jalankan skrip SQL ini di SQL Editor Supabase untuk membuat tabel basis data pendaftar & data portal PGRI.
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(SUPABASE_COMPLETE_SQL);
+                            setCopiedSql(true);
+                            showToast('Skrip SQL berhasil disalin ke clipboard!', 'success');
+                            setTimeout(() => setCopiedSql(false), 3000);
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold transition-all shadow-xs cursor-pointer"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>{copiedSql ? 'Tersalin ✓' : 'Salin Skrip SQL'}</span>
+                        </button>
+
+                        <a
+                          href="https://supabase.com/dashboard/project/vokxvtbijnubrzbdazxs/sql/new"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold transition-all shadow-xs"
+                        >
+                          <span>Buka SQL Editor Supabase</span>
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      </div>
+                    </div>
+
+                    <div className="relative">
+                      <pre className="p-4 bg-slate-900 text-emerald-300 rounded-xl text-xs font-mono overflow-x-auto max-h-72 border border-slate-800 leading-relaxed">
+                        {SUPABASE_COMPLETE_SQL}
+                      </pre>
+                    </div>
+
+                    <div className="text-xs text-emerald-900 space-y-1 bg-white/80 p-3.5 rounded-xl border border-emerald-200">
+                      <div className="font-bold">Langkah Cepat Aktivasi di Supabase:</div>
+                      <ol className="list-decimal list-inside space-y-1 text-slate-700 pl-1">
+                        <li>
+                          Klik tombol <strong>Salin Skrip SQL</strong> di atas.
+                        </li>
+                        <li>
+                          Klik <strong>Buka SQL Editor Supabase</strong> untuk membuka dashboard proyek Supabase Anda.
+                        </li>
+                        <li>
+                          Tempelkan (<em>paste</em>) kode SQL ke editor, lalu klik tombol hijau <strong>RUN</strong> di Supabase.
+                        </li>
+                        <li>
+                          Kembali ke halaman ini dan klik tombol <strong>Uji Koneksi</strong> lalu <strong>Sinkronkan Semua Data</strong>.
+                        </li>
+                      </ol>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Tab: Backup & Restore */}
               {activeTab === 'backup' && (
                 <div className="space-y-6">
@@ -1265,20 +1532,20 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="p-5 rounded-2xl border border-emerald-300 bg-emerald-50/60 sm:col-span-2 space-y-3">
                       <div className="flex items-center gap-2 font-bold text-emerald-950 text-sm">
-                        <Cloud className="w-5 h-5 text-emerald-600" />
-                        <span>Sinkronisasi Penuh ke Cloud Firestore</span>
+                        <Database className="w-5 h-5 text-emerald-600" />
+                        <span>Sinkronisasi Penuh ke Database Supabase</span>
                       </div>
                       <p className="text-xs text-emerald-800">
-                        Unggah dan tetapkan seluruh data profil, pengurus, sejarah, berita, program kerja, kegiatan, kalender, dan layanan saat ini ke database Cloud Firestore. Semua pengguna di berbagai perangkat akan langsung melihat data ini.
+                        Unggah dan simpan seluruh data profil, pengurus, sejarah, berita, program kerja, kegiatan, kalender, dan layanan saat ini ke database PostgreSQL Supabase. Semua pengguna di berbagai perangkat akan langsung melihat data ini.
                       </p>
                       <button
                         type="button"
-                        onClick={() => syncAllToFirestore()}
-                        disabled={isSyncingCloud}
+                        onClick={() => syncAllToSupabase()}
+                        disabled={isSyncingSupabase}
                         className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-sm transition-all disabled:opacity-50 cursor-pointer"
                       >
-                        <RefreshCw className={`h-4 w-4 ${isSyncingCloud ? 'animate-spin' : ''}`} />
-                        <span>{isSyncingCloud ? 'Menyinkronkan...' : 'Sinkronkan Semua Data ke Cloud Firestore'}</span>
+                        <RefreshCw className={`h-4 w-4 ${isSyncingSupabase ? 'animate-spin' : ''}`} />
+                        <span>{isSyncingSupabase ? 'Menyinkronkan...' : 'Sinkronkan Semua Data ke Supabase'}</span>
                       </button>
                     </div>
 
@@ -1313,12 +1580,20 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
                       </p>
                       <button
                         type="button"
-                        onClick={() => {
-                          if (confirm('Apakah Anda yakin ingin mengembalikan seluruh data ke standar awal?')) {
-                            resetToDefaults();
-                          }
-                        }}
-                        className="inline-flex items-center gap-2 px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-semibold"
+                        onClick={() =>
+                          requestDelete({
+                            title: 'Kembalikan ke Standar Awal?',
+                            itemName: 'Seluruh data konfigurasi & konten portal',
+                            itemType: 'Sistem',
+                            description:
+                              'Semua perubahan data lokal akan dikembalikan ke data standar bawaan awal PGRI Pasirwangi.',
+                            onConfirm: () => {
+                              resetToDefaults();
+                              setDeleteConfirmState((prev) => ({ ...prev, isOpen: false }));
+                            },
+                          })
+                        }
+                        className="inline-flex items-center gap-2 px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-semibold cursor-pointer transition-colors"
                       >
                         <RotateCcw className="h-4 w-4" />
                         <span>Kembalikan Standar Awal</span>
@@ -1331,6 +1606,17 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
           </div>
         )}
       </div>
+
+      {/* MODAL VERIFIKASI HAPUS UMUM PANEL ADMIN */}
+      <DeleteConfirmationModal
+        isOpen={deleteConfirmState.isOpen}
+        title={deleteConfirmState.title}
+        itemName={deleteConfirmState.itemName}
+        itemType={deleteConfirmState.itemType}
+        description={deleteConfirmState.description}
+        onClose={() => setDeleteConfirmState((prev) => ({ ...prev, isOpen: false }))}
+        onConfirm={deleteConfirmState.onConfirm}
+      />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import React, { useState, useRef } from 'react';
 import Image from 'next/image';
 import { usePgriStore } from '@/lib/store';
 import { KegiatanItem } from '@/lib/types';
+import { DeleteConfirmationModal } from './DeleteConfirmationModal';
 import {
   CalendarDays,
   Plus,
@@ -24,6 +25,7 @@ export function AdminKegiatanTab() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<KegiatanItem | null>(null);
 
   const [formData, setFormData] = useState({
     nama: '',
@@ -282,23 +284,41 @@ export function AdminKegiatanTab() {
           </div>
         </div>
 
-        <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
-          {editingId && (
+        <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-200">
+          {editingId ? (
             <button
               type="button"
-              onClick={cancelEdit}
-              className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-semibold text-xs"
+              onClick={() => {
+                const item = kegiatanList.find((k) => k.id === editingId);
+                if (item) setDeleteTarget(item);
+              }}
+              className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl font-semibold text-xs flex items-center gap-1.5 cursor-pointer"
             >
-              Batal
+              <Trash2 className="h-3.5 w-3.5" />
+              <span>Hapus Kegiatan Ini</span>
             </button>
+          ) : (
+            <div />
           )}
-          <button
-            type="submit"
-            className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-sm"
-          >
-            {editingId ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-            <span>{editingId ? 'Simpan Perubahan' : 'Terbitkan Kegiatan'}</span>
-          </button>
+
+          <div className="flex items-center gap-2">
+            {editingId && (
+              <button
+                type="button"
+                onClick={cancelEdit}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-semibold text-xs cursor-pointer"
+              >
+                Batal
+              </button>
+            )}
+            <button
+              type="submit"
+              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
+            >
+              {editingId ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+              <span>{editingId ? 'Simpan Perubahan' : 'Terbitkan Kegiatan'}</span>
+            </button>
+          </div>
         </div>
       </form>
 
@@ -359,13 +379,9 @@ export function AdminKegiatanTab() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    if (confirm(`Hapus kegiatan "${item.nama}"?`)) {
-                      deleteKegiatan(item.id);
-                      showToast('Kegiatan berhasil dihapus!', 'info');
-                    }
-                  }}
-                  className="px-2.5 py-1 text-xs text-teal-600 hover:bg-teal-50 rounded-lg font-semibold flex items-center gap-1"
+                  onClick={() => setDeleteTarget(item)}
+                  className="px-2.5 py-1 text-xs text-rose-600 hover:bg-rose-50 rounded-lg font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                  title="Hapus Dokumentasi Kegiatan"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                   <span>Hapus</span>
@@ -375,6 +391,22 @@ export function AdminKegiatanTab() {
           ))}
         </div>
       </div>
+
+      {/* MODAL VERIFIKASI HAPUS KEGIATAN */}
+      <DeleteConfirmationModal
+        isOpen={!!deleteTarget}
+        title="Hapus Dokumentasi Kegiatan?"
+        itemName={deleteTarget ? `${deleteTarget.nama} (${deleteTarget.tanggal})` : ''}
+        itemType="Kegiatan"
+        description="Dokumentasi kegiatan ini akan dihapus permanen dari portal dan basis data Supabase."
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) {
+            deleteKegiatan(deleteTarget.id);
+            setDeleteTarget(null);
+          }
+        }}
+      />
     </div>
   );
 }

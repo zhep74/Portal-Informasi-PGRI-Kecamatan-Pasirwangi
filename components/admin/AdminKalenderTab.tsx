@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { usePgriStore } from '@/lib/store';
 import { KalenderItem } from '@/lib/types';
+import { DeleteConfirmationModal } from './DeleteConfirmationModal';
 import {
   Calendar,
   Plus,
@@ -21,6 +22,7 @@ export function AdminKalenderTab() {
   const { kalenderList, addKalender, updateKalender, deleteKalender, showToast } = usePgriStore();
 
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<KalenderItem | null>(null);
 
   const [formData, setFormData] = useState({
     judul: '',
@@ -284,23 +286,41 @@ export function AdminKalenderTab() {
           />
         </div>
 
-        <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
-          {editingId && (
+        <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-200">
+          {editingId ? (
             <button
               type="button"
-              onClick={cancelEdit}
-              className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-semibold text-xs"
+              onClick={() => {
+                const item = kalenderList.find((k) => k.id === editingId);
+                if (item) setDeleteTarget(item);
+              }}
+              className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl font-semibold text-xs flex items-center gap-1.5 cursor-pointer"
             >
-              Batal
+              <Trash2 className="h-3.5 w-3.5" />
+              <span>Hapus Agenda Ini</span>
             </button>
+          ) : (
+            <div />
           )}
-          <button
-            type="submit"
-            className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-sm"
-          >
-            {editingId ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-            <span>{editingId ? 'Simpan Perubahan' : 'Jadwalkan Agenda'}</span>
-          </button>
+
+          <div className="flex items-center gap-2">
+            {editingId && (
+              <button
+                type="button"
+                onClick={cancelEdit}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-semibold text-xs cursor-pointer"
+              >
+                Batal
+              </button>
+            )}
+            <button
+              type="submit"
+              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
+            >
+              {editingId ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+              <span>{editingId ? 'Simpan Perubahan' : 'Jadwalkan Agenda'}</span>
+            </button>
+          </div>
         </div>
       </form>
 
@@ -384,22 +404,34 @@ export function AdminKalenderTab() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    if (confirm(`Hapus agenda "${item.judul}"?`)) {
-                      deleteKalender(item.id);
-                      showToast('Agenda berhasil dihapus!', 'info');
-                    }
-                  }}
-                  className="p-1.5 text-teal-600 hover:bg-teal-50 rounded-lg"
-                  title="Hapus"
+                  onClick={() => setDeleteTarget(item)}
+                  className="px-2.5 py-1 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-rose-200/80 rounded-lg font-semibold flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
+                  title="Hapus Agenda"
                 >
-                  <Trash2 className="h-4 w-4" />
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span>Hapus</span>
                 </button>
               </div>
             </div>
           ))}
         </div>
       </div>
+
+      {/* MODAL VERIFIKASI HAPUS AGENDA KALENDER */}
+      <DeleteConfirmationModal
+        isOpen={!!deleteTarget}
+        title="Hapus Agenda Kegiatan?"
+        itemName={deleteTarget ? `${deleteTarget.judul} (${deleteTarget.tanggal})` : ''}
+        itemType="Kalender"
+        description="Jadwal agenda ini akan dihapus permanen dari kalender kegiatan organisasi dan basis data Supabase."
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) {
+            deleteKalender(deleteTarget.id);
+            setDeleteTarget(null);
+          }
+        }}
+      />
     </div>
   );
 }

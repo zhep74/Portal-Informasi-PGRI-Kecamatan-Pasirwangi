@@ -3,6 +3,7 @@
 import React, { useState, useRef } from 'react';
 import Image from 'next/image';
 import { usePgriStore } from '@/lib/store';
+import { DeleteConfirmationModal } from './DeleteConfirmationModal';
 import {
   Upload,
   Link as LinkIcon,
@@ -25,6 +26,7 @@ export function KetuaFotoUploader({ compact = false }: KetuaFotoUploaderProps) {
   const [imageUrlInput, setImageUrlInput] = useState('');
   const [isUrlMode, setIsUrlMode] = useState(false);
   const [syncWithPengurus, setSyncWithPengurus] = useState(true);
+  const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
 
   const currentFoto = profile.sambutanKetua.fotoUrl || '/images/ketua_pgri.jpg';
 
@@ -170,6 +172,18 @@ export function KetuaFotoUploader({ compact = false }: KetuaFotoUploaderProps) {
             <div className="text-[10px] text-slate-400 mt-0.5">
               NIP: {profile.sambutanKetua.nip || '-'}
             </div>
+
+            {currentFoto !== '/images/ketua_pgri.jpg' && (
+              <button
+                type="button"
+                onClick={() => setIsResetConfirmOpen(true)}
+                className="mt-2.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-all cursor-pointer shadow-2xs"
+                title="Hapus foto kustom dan gunakan foto standar"
+              >
+                <Trash2 className="h-3 w-3" />
+                <span>Hapus Foto Kustom</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -289,6 +303,22 @@ export function KetuaFotoUploader({ compact = false }: KetuaFotoUploaderProps) {
           </div>
         </div>
       </div>
+
+      {/* Modal Verifikasi Hapus Foto Kustom */}
+      <DeleteConfirmationModal
+        isOpen={isResetConfirmOpen}
+        title="Hapus Foto Kustom Ketua PGRI?"
+        itemName="Foto profil ketua cabang saat ini"
+        itemType="Foto Profil"
+        description="Foto kustom akan dihapus dan dikembalikan ke foto resmi bawaan PGRI Pasirwangi."
+        confirmButtonText="Ya, Hapus & Kembalikan"
+        onClose={() => setIsResetConfirmOpen(false)}
+        onConfirm={() => {
+          applyFoto('/images/ketua_pgri.jpg');
+          setIsResetConfirmOpen(false);
+          showToast('Foto dikembalikan ke foto resmi standar PGRI', 'info');
+        }}
+      />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import React, { useState, useRef } from 'react';
 import { usePgriStore } from '@/lib/store';
 import { PengurusItem } from '@/lib/types';
 import { KetuaFotoUploader } from './KetuaFotoUploader';
+import { DeleteConfirmationModal } from './DeleteConfirmationModal';
 import * as XLSX from 'xlsx';
 import {
   Upload,
@@ -50,6 +51,9 @@ export function AdminPengurusTab() {
 
   // Modal State for Editing Pengurus
   const [editingPengurus, setEditingPengurus] = useState<PengurusItem | null>(null);
+
+  // Modal State for Deleting Pengurus (Verification Modal)
+  const [deleteTarget, setDeleteTarget] = useState<PengurusItem | null>(null);
 
   // Import Excel State
   const [importPreviewData, setImportPreviewData] = useState<
@@ -578,15 +582,11 @@ export function AdminPengurusTab() {
                             <Edit3 className="h-4 w-4" />
                           </button>
 
-                          {/* 3. HAPUS (DELETE - Tetap Dipertahankan Sesuai Permintaan) */}
+                          {/* 3. HAPUS (DELETE - Menggunakan Modal Verifikasi) */}
                           <button
                             type="button"
-                            onClick={() => {
-                              if (confirm(`Hapus pengurus "${p.nama}"?`)) {
-                                deletePengurus(p.id);
-                              }
-                            }}
-                            className="p-1.5 text-slate-400 hover:text-teal-700 hover:bg-teal-50 rounded-lg transition-colors cursor-pointer"
+                            onClick={() => setDeleteTarget(p)}
+                            className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
                             title="Hapus Pengurus"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -714,26 +714,41 @@ export function AdminPengurusTab() {
             </div>
 
             {/* Modal Actions */}
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setViewingPengurus(null)}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold cursor-pointer"
-              >
-                Tutup
-              </button>
+            <div className="flex items-center justify-between gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => {
                   const target = viewingPengurus;
                   setViewingPengurus(null);
-                  setEditingPengurus({ ...target });
+                  setDeleteTarget(target);
                 }}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer border border-rose-200"
               >
-                <Edit3 className="h-3.5 w-3.5" />
-                <span>Edit Lengkap</span>
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>Hapus Pengurus</span>
               </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setViewingPengurus(null)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold cursor-pointer"
+                >
+                  Tutup
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = viewingPengurus;
+                    setViewingPengurus(null);
+                    setEditingPengurus({ ...target });
+                  }}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <Edit3 className="h-3.5 w-3.5" />
+                  <span>Edit Lengkap</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -880,29 +895,44 @@ export function AdminPengurusTab() {
             </div>
 
             {/* Actions */}
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setEditingPengurus(null)}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold cursor-pointer"
-              >
-                Batal
-              </button>
+            <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
               <button
                 type="button"
                 onClick={() => {
-                  if (!editingPengurus.nama.trim() || !editingPengurus.jabatan.trim()) {
-                    showToast('Nama dan Jabatan wajib diisi!', 'warning');
-                    return;
-                  }
-                  updatePengurus(editingPengurus.id, editingPengurus);
+                  const target = editingPengurus;
                   setEditingPengurus(null);
-                  showToast('Perubahan data pengurus berhasil disimpan!', 'success');
+                  setDeleteTarget(target);
                 }}
-                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer"
+                className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer border border-rose-200"
               >
-                Simpan Perubahan
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>Hapus Pengurus</span>
               </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingPengurus(null)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!editingPengurus.nama.trim() || !editingPengurus.jabatan.trim()) {
+                      showToast('Nama dan Jabatan wajib diisi!', 'warning');
+                      return;
+                    }
+                    updatePengurus(editingPengurus.id, editingPengurus);
+                    setEditingPengurus(null);
+                    showToast('Perubahan data pengurus berhasil disimpan!', 'success');
+                  }}
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer"
+                >
+                  Simpan Perubahan
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -990,6 +1020,22 @@ export function AdminPengurusTab() {
           </div>
         </div>
       )}
+
+      {/* MODAL 4: VERIFIKASI HAPUS PENGURUS */}
+      <DeleteConfirmationModal
+        isOpen={!!deleteTarget}
+        title="Hapus Data Pengurus?"
+        itemName={deleteTarget ? `${deleteTarget.nama} (${deleteTarget.jabatan})` : ''}
+        itemType="Pengurus"
+        description="Data pengurus ini akan dihapus dari daftar kepengurusan cabang dan basis data Supabase."
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) {
+            deletePengurus(deleteTarget.id);
+            setDeleteTarget(null);
+          }
+        }}
+      />
     </div>
   );
 }
