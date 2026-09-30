@@ -147,7 +147,7 @@ export function Footer({ onOpenAdmin }: FooterProps) {
         <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-400">
           <div className="text-center sm:text-left">
             <div>
-              &copy; 2026 PGRI Cabang Kecamatan Pasirwangi. All Rights Reserved.
+              &copy; 2026 PGRI Cabang Kecamatan Pasirwangi. Developer Asep Akon, S.Pd. All Rights Reserved.
             </div>
             <div className="text-slate-400 mt-0.5">
               Portal Informasi Digital PGRI Kecamatan Pasirwangi

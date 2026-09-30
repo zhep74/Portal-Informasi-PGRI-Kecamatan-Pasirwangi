@@ -80,7 +80,7 @@ export function SambutanSection() {
 
                 <div className="flex flex-col items-start sm:items-end">
                   <div className="font-serif italic text-emerald-800 text-lg font-bold tracking-wider select-none">
-                    {sambutanKetua.tandaTanganNama}
+                   Sukendar, S.Pd
                   </div>
                   <div className="text-[11px] text-slate-500">
                     Ketua PGRI Cabang Pasirwangi
