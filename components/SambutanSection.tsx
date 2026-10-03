@@ -21,13 +21,13 @@ export function SambutanSection() {
                 <span className="bg-emerald-800/60 px-2.5 py-0.5 rounded text-[10px] text-white">Resmi</span>
               </div>
 
-              {/* Portrait Frame */}
-              <div className="relative w-44 h-44 sm:w-52 sm:h-52 rounded-2xl overflow-hidden border-2 border-emerald-500/40 shadow-2xl my-auto">
+              {/* Portrait Frame (Circular) */}
+              <div className="relative w-44 h-44 sm:w-52 sm:h-52 rounded-full overflow-hidden border-4 border-emerald-400/40 ring-4 ring-emerald-500/20 shadow-2xl my-auto">
                 <Image
                   src={sambutanKetua.fotoUrl || '/images/ketua_pgri.jpg'}
                   alt={sambutanKetua.nama}
                   fill
-                  className="object-cover object-top"
+                  className="object-cover object-center"
                   referrerPolicy="no-referrer"
                 />
               </div>

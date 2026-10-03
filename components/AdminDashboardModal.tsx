@@ -38,6 +38,7 @@ import {
   RefreshCw,
   Copy,
   ExternalLink,
+  KeyRound,
 } from 'lucide-react';
 import { SUPABASE_COMPLETE_SQL, SUPABASE_URL } from '@/lib/supabase';
 import { KetuaFotoUploader } from './admin/KetuaFotoUploader';
@@ -46,10 +47,12 @@ import { AdminPengurusTab } from './admin/AdminPengurusTab';
 import { AdminSejarahTab } from './admin/AdminSejarahTab';
 import { AdminVisiMisiTab } from './admin/AdminVisiMisiTab';
 import { AdminKegiatanTab } from './admin/AdminKegiatanTab';
+import { AdminBeritaTab } from './admin/AdminBeritaTab';
 import { AdminPrestasiTab } from './admin/AdminPrestasiTab';
 import { AdminGaleriTab } from './admin/AdminGaleriTab';
 import { AdminKalenderTab } from './admin/AdminKalenderTab';
 import { AdminLayananTab } from './admin/AdminLayananTab';
+import { AdminPasswordTab } from './admin/AdminPasswordTab';
 import { DeleteConfirmationModal } from './admin/DeleteConfirmationModal';
 
 interface AdminDashboardModalProps {
@@ -245,6 +248,7 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
     { key: 'pendaftaran', label: 'Pendaftaran Masuk', icon: FileEdit, badge: pendaftaranList.filter(p => p.status === 'Baru').length },
     { key: 'aspirasi', label: 'Aspirasi Anggota', icon: MessageSquareQuote, badge: aspirasiList.filter(a => a.status === 'Diterima').length },
     { key: 'medsos', label: 'Media Sosial & Kontak', icon: Share2 },
+    { key: 'password', label: 'Pengaturan Kata Sandi', icon: KeyRound },
     { key: 'supabase', label: 'Database Supabase', icon: Database, badge: supabaseStatus.connected ? 'Aktif' : 'Atur' },
     { key: 'backup', label: 'Cadangan & Pemulihan', icon: Database },
   ];
@@ -282,6 +286,20 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
                   <span className="hidden sm:inline">
                     {isSyncingSupabase ? 'Menyinkronkan...' : 'Sinkron Supabase'}
                   </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('password')}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl transition-all shadow-sm cursor-pointer ${
+                    activeTab === 'password'
+                      ? 'bg-amber-400 text-slate-950 font-bold shadow-md'
+                      : 'text-amber-300 hover:text-white bg-amber-950/60 hover:bg-amber-900 border border-amber-700/60'
+                  }`}
+                  title="Menu Pengaturan Ganti Kata Sandi Admin"
+                >
+                  <KeyRound className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Ganti Password</span>
                 </button>
 
                 {adminUser && (
@@ -509,6 +527,32 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
                         <span>{isSyncingSupabase ? 'Menyinkronkan...' : 'Sinkronkan ke Supabase'}</span>
                       </button>
                     </div>
+                  </div>
+
+                  {/* Keamanan & Pengaturan Kata Sandi Quick Card */}
+                  <div className="p-5 rounded-2xl bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-slate-50 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-amber-600 text-white flex items-center justify-center shrink-0 shadow-md">
+                        <KeyRound className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900">
+                          Pengaturan Kata Sandi & Akses Keamanan Pengurus
+                        </h4>
+                        <p className="text-xs text-slate-600 mt-1 max-w-xl">
+                          Tingkatkan keamanan akun pengurus dengan memperbarui kata sandi secara berkala. Perubahan kata sandi langsung aktif dan dapat diatur atau dikembalikan kapan saja.
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('password')}
+                      className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-xl shadow-md transition-all shrink-0 cursor-pointer"
+                    >
+                      <KeyRound className="w-4 h-4" />
+                      <span>Buka Pengaturan Sandi</span>
+                    </button>
                   </div>
                 </div>
               )}
@@ -849,96 +893,7 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
               {activeTab === 'kegiatan' && <AdminKegiatanTab />}
 
               {/* Tab: Berita */}
-              {activeTab === 'berita' && (
-                <div className="space-y-6">
-                  <h3 className="text-lg font-bold text-slate-900">Kelola Warta & Berita</h3>
-
-                  {/* Add Berita Form */}
-                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3 text-xs">
-                    <div className="font-bold text-slate-900">Terbitkan Berita Baru:</div>
-                    <input
-                      type="text"
-                      placeholder="Judul Berita"
-                      value={newBerita.judul}
-                      onChange={(e) => setNewBerita({ ...newBerita, judul: e.target.value })}
-                      className="w-full px-3 py-2 bg-white border rounded-xl"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Ringkasan Singkat"
-                      value={newBerita.ringkasan}
-                      onChange={(e) => setNewBerita({ ...newBerita, ringkasan: e.target.value })}
-                      className="w-full px-3 py-2 bg-white border rounded-xl"
-                    />
-                    <textarea
-                      rows={4}
-                      placeholder="Isi Lengkap Berita..."
-                      value={newBerita.isi}
-                      onChange={(e) => setNewBerita({ ...newBerita, isi: e.target.value })}
-                      className="w-full px-3 py-2 bg-white border rounded-xl"
-                    />
-                    <div className="flex justify-end">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!newBerita.judul) return;
-                          addBerita(newBerita);
-                          setNewBerita({
-                            judul: '',
-                            ringkasan: '',
-                            isi: '',
-                            kategori: 'Organisasi',
-                            tanggal: new Date().toISOString().split('T')[0],
-                            penulis: 'Humas PGRI',
-                            fotoUrl: '/images/hero_pgri.jpg',
-                          });
-                        }}
-                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold flex items-center gap-1.5"
-                      >
-                        <Plus className="h-4 w-4" />
-                        <span>Terbitkan Berita</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    {beritaList.map((b) => (
-                      <div
-                        key={b.id}
-                        className="p-3 border rounded-xl flex items-center justify-between text-xs"
-                      >
-                        <div>
-                          <div className="font-bold text-slate-900">{b.judul}</div>
-                          <div className="text-slate-400">
-                            {b.kategori} · {b.tanggal} · Dibaca: {b.dibacaCount}x
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            requestDelete({
-                              title: 'Hapus Warta Berita?',
-                              itemName: b.judul,
-                              itemType: 'Berita',
-                              description:
-                                'Berita ini akan dihapus permanen dari portal warta organisasi dan basis data Supabase.',
-                              onConfirm: () => {
-                                deleteBerita(b.id);
-                                setDeleteConfirmState((prev) => ({ ...prev, isOpen: false }));
-                              },
-                            })
-                          }
-                          className="px-2.5 py-1 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-rose-200/80 rounded-lg font-semibold flex items-center gap-1 cursor-pointer transition-all shadow-2xs shrink-0"
-                          title="Hapus Berita"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          <span>Hapus</span>
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+              {activeTab === 'berita' && <AdminBeritaTab />}
 
               {/* Tab: Prestasi */}
               {activeTab === 'prestasi' && <AdminPrestasiTab />}
@@ -1601,6 +1556,11 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
                     </div>
                   </div>
                 </div>
+              )}
+
+              {/* Tab: Pengaturan Ganti Kata Sandi Admin */}
+              {activeTab === 'password' && (
+                <AdminPasswordTab />
               )}
             </main>
           </div>

@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { usePgriStore } from '@/lib/store';
 import { GaleriItem } from '@/lib/types';
 import { DeleteConfirmationModal } from './DeleteConfirmationModal';
+import { compressImageFile } from '@/lib/imageCompressor';
 import {
   Film,
   Plus,
@@ -17,6 +18,7 @@ import {
   CheckCircle2,
   X,
   PlayCircle,
+  Loader2,
 } from 'lucide-react';
 
 export function AdminGaleriTab() {
@@ -42,7 +44,9 @@ export function AdminGaleriTab() {
     return match && match[2].length === 11 ? match[2] : undefined;
   };
 
-  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [isCompressingImage, setIsCompressingImage] = useState(false);
+
+  const handleImageFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -51,16 +55,17 @@ export function AdminGaleriTab() {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const result = event.target?.result as string;
-      if (result) {
-        setFormData((prev) => ({ ...prev, url: result }));
-        showToast('Foto galeri berhasil diunggah!', 'success');
-      }
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
+    setIsCompressingImage(true);
+    try {
+      const compressed = await compressImageFile(file, 1200, 800, 0.82);
+      setFormData((prev) => ({ ...prev, url: compressed }));
+      showToast('Foto galeri berhasil diunggah & dioptimalkan!', 'success');
+    } catch {
+      showToast('Gagal memproses berkas foto!', 'error');
+    } finally {
+      setIsCompressingImage(false);
+      e.target.value = '';
+    }
   };
 
   const handleSave = (e: React.FormEvent) => {

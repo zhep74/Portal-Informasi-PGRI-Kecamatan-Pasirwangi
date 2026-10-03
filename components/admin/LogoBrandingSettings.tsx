@@ -4,6 +4,7 @@ import React, { useState, useRef } from 'react';
 import { usePgriStore } from '@/lib/store';
 import { PgriLogo, PgriSvgEmblem } from '@/components/PgriLogo';
 import { DeleteConfirmationModal } from './DeleteConfirmationModal';
+import { compressImageFile } from '@/lib/imageCompressor';
 import {
   Upload,
   Link as LinkIcon,
@@ -48,7 +49,7 @@ export function LogoBrandingSettings() {
   const faviconFileRef = useRef<HTMLInputElement>(null);
 
   // Handle App Logo File Upload (PNG/SVG/JPG/WebP)
-  const handleAppLogoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAppLogoFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -57,26 +58,20 @@ export function LogoBrandingSettings() {
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      showToast('Ukuran gambar maksimal 5 MB', 'error');
-      return;
+    try {
+      const dataUrl = await compressImageFile(file, 400, 400, 0.9);
+      setLogoInputUrl(dataUrl);
+      updateProfile({ logoUrl: dataUrl });
+      showToast('Logo aplikasi berhasil diperbarui dari perangkat!', 'success');
+    } catch {
+      showToast('Gagal memproses berkas logo!', 'error');
+    } finally {
+      e.target.value = '';
     }
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
-      if (dataUrl) {
-        setLogoInputUrl(dataUrl);
-        updateProfile({ logoUrl: dataUrl });
-        showToast('Logo aplikasi berhasil diperbarui dari perangkat!', 'success');
-      }
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
   };
 
   // Handle Favicon File Upload (.ico, .png, .svg)
-  const handleFaviconFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFaviconFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -85,22 +80,16 @@ export function LogoBrandingSettings() {
       return;
     }
 
-    if (file.size > 2 * 1024 * 1024) {
-      showToast('Ukuran file favicon maksimal 2 MB', 'error');
-      return;
+    try {
+      const dataUrl = await compressImageFile(file, 192, 192, 0.9);
+      setFaviconInputUrl(dataUrl);
+      updateProfile({ faviconUrl: dataUrl });
+      showToast('Logo Title URL (Favicon) berhasil diperbarui!', 'success');
+    } catch {
+      showToast('Gagal memproses berkas favicon!', 'error');
+    } finally {
+      e.target.value = '';
     }
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
-      if (dataUrl) {
-        setFaviconInputUrl(dataUrl);
-        updateProfile({ faviconUrl: dataUrl });
-        showToast('Logo Title URL (Favicon) berhasil diperbarui!', 'success');
-      }
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
   };
 
   // Apply custom URL for App Logo

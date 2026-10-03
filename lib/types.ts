@@ -204,6 +204,7 @@ export interface SiteSettings {
   pengumumanDarurat?: string;
   logoAplikasiUrl?: string;
   logoTitleUrl?: string;
+  adminPassword?: string;
   visitorStats: {
     hariIni: number;
     bulanIni: number;

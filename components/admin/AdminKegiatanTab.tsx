@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { usePgriStore } from '@/lib/store';
 import { KegiatanItem } from '@/lib/types';
 import { DeleteConfirmationModal } from './DeleteConfirmationModal';
+import { compressImageFile } from '@/lib/imageCompressor';
 import {
   CalendarDays,
   Plus,
@@ -38,7 +39,7 @@ export function AdminKegiatanTab() {
     galeriDokumentasi: [] as string[],
   });
 
-  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -47,16 +48,15 @@ export function AdminKegiatanTab() {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const result = event.target?.result as string;
-      if (result) {
-        setFormData((prev) => ({ ...prev, fotoUtama: result }));
-        showToast('Foto kegiatan berhasil diunggah!', 'success');
-      }
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
+    try {
+      const compressed = await compressImageFile(file, 1200, 800, 0.82);
+      setFormData((prev) => ({ ...prev, fotoUtama: compressed }));
+      showToast('Foto kegiatan berhasil diunggah & dioptimalkan!', 'success');
+    } catch {
+      showToast('Gagal memproses berkas gambar!', 'error');
+    } finally {
+      e.target.value = '';
+    }
   };
 
   const handleSave = (e: React.FormEvent) => {

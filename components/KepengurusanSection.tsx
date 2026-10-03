@@ -74,22 +74,26 @@ export function KepengurusanSection() {
               className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden shadow-sm hover:shadow-md hover:border-emerald-300 transition-all flex flex-col justify-between group"
             >
               <div>
-                {/* Photo container */}
-                <div className="relative w-full h-56 bg-slate-100 overflow-hidden">
-                  <Image
-                    src={pengurus.fotoUrl || '/images/ketua_pgri.jpg'}
-                    alt={pengurus.nama}
-                    fill
-                    className="object-cover object-top transition-transform duration-300 group-hover:scale-105"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div className="absolute top-3 left-3 bg-emerald-600 text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded shadow-sm">
+                {/* Circular Photo container */}
+                <div className="relative pt-6 pb-2 px-4 flex flex-col items-center bg-gradient-to-b from-emerald-50/40 via-slate-50/30 to-white">
+                  <div className="absolute top-3 right-3 bg-emerald-600 text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full shadow-2xs">
                     {pengurus.kategori}
+                  </div>
+
+                  {/* Circular Portrait Frame */}
+                  <div className="relative w-36 h-36 sm:w-40 sm:h-40 rounded-full overflow-hidden border-4 border-white shadow-md ring-4 ring-emerald-500/20 bg-slate-100 group-hover:ring-emerald-500/50 transition-all duration-300">
+                    <Image
+                      src={pengurus.fotoUrl || '/images/ketua_pgri.jpg'}
+                      alt={pengurus.nama}
+                      fill
+                      className="object-cover object-center transition-transform duration-300 group-hover:scale-105"
+                      referrerPolicy="no-referrer"
+                    />
                   </div>
                 </div>
 
                 {/* Content */}
-                <div className="p-5">
+                <div className="p-5 pt-2">
                   <h3 className="text-base font-bold text-slate-900 leading-snug group-hover:text-emerald-700 transition-colors">
                     {pengurus.nama}
                   </h3>
@@ -144,12 +148,12 @@ export function KepengurusanSection() {
               </button>
 
               <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5">
-                <div className="relative w-28 h-28 sm:w-32 sm:h-32 rounded-2xl overflow-hidden border-2 border-emerald-200 shrink-0">
+                <div className="relative w-32 h-32 sm:w-36 sm:h-36 rounded-full overflow-hidden border-4 border-emerald-500/30 ring-4 ring-emerald-100 shadow-xl shrink-0 bg-slate-100">
                   <Image
                     src={selectedPengurus.fotoUrl || '/images/ketua_pgri.jpg'}
                     alt={selectedPengurus.nama}
                     fill
-                    className="object-cover object-top"
+                    className="object-cover object-center"
                     referrerPolicy="no-referrer"
                   />
                 </div>

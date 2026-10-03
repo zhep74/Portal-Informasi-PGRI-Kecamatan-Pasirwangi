@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { usePgriStore } from '@/lib/store';
 import { PrestasiItem } from '@/lib/types';
 import { DeleteConfirmationModal } from './DeleteConfirmationModal';
+import { compressImageFile } from '@/lib/imageCompressor';
 import {
   Trophy,
   Plus,
@@ -35,7 +36,7 @@ export function AdminPrestasiTab() {
     deskripsi: '',
   });
 
-  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -44,16 +45,15 @@ export function AdminPrestasiTab() {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const result = event.target?.result as string;
-      if (result) {
-        setFormData((prev) => ({ ...prev, fotoPiagam: result }));
-        showToast('Foto piagam berhasil dimuat!', 'success');
-      }
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
+    try {
+      const compressed = await compressImageFile(file, 1200, 800, 0.82);
+      setFormData((prev) => ({ ...prev, fotoPiagam: compressed }));
+      showToast('Foto piagam berhasil dimuat & dioptimalkan!', 'success');
+    } catch {
+      showToast('Gagal memproses berkas piagam!', 'error');
+    } finally {
+      e.target.value = '';
+    }
   };
 
   const handleSave = (e: React.FormEvent) => {

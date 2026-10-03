@@ -69,6 +69,7 @@ import {
   deletePendaftaranFromSupabase,
 } from './supabase';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
+import { idbSet, idbGet, idbDelete } from './idb';
 
 export interface ToastMessage {
   id: string;
@@ -122,10 +123,12 @@ interface PgriContextType {
   checkSupabaseStatus: () => Promise<void>;
   syncAllToSupabase: () => Promise<void>;
 
-  // Admin Auth
+  // Admin Auth & Security
   loginAdmin: (password: string) => boolean;
   loginAdminWithGoogle: () => Promise<boolean>;
   logoutAdmin: () => void;
+  changeAdminPassword: (currentPassword: string, newPassword: string) => { success: boolean; message: string };
+  resetAdminPassword: () => void;
   showToast: (message: string, type?: 'success' | 'error' | 'info' | 'warning') => void;
   removeToast: (id: string) => void;
 
@@ -164,6 +167,7 @@ interface PgriContextType {
   addBerita: (item: Omit<BeritaItem, 'id' | 'slug' | 'dibacaCount'>) => void;
   updateBerita: (id: string, item: Partial<BeritaItem>) => void;
   deleteBerita: (id: string) => void;
+  setBeritaUtama: (id: string) => void;
   incrementBeritaViews: (id: string) => void;
 
   // Prestasi
@@ -208,6 +212,7 @@ interface PgriContextType {
 
 const STORAGE_KEY = 'pgri_pasirwangi_store_v1';
 const AUTH_KEY = 'pgri_admin_auth';
+const ADMIN_PASSWORD_KEY = 'pgri_custom_admin_password';
 
 const PgriContext = createContext<PgriContextType | undefined>(undefined);
 
@@ -221,6 +226,41 @@ function deduplicateItems<T extends { id: string }>(items: T[], prefix: string):
     seenIds.add(id);
     return { ...item, id };
   });
+}
+
+function sanitizeForLocalStorage(obj: any): any {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj === 'string') {
+    // If it's a base64 data URL or heavy string (> 500 chars), replace with lightweight placeholder so localStorage never exceeds quota
+    if ((obj.startsWith('data:') || obj.includes(';base64,')) && obj.length > 500) {
+      return '/images/hero_pgri.jpg';
+    }
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(sanitizeForLocalStorage);
+  }
+  if (typeof obj === 'object') {
+    const res: Record<string, any> = {};
+    for (const key of Object.keys(obj)) {
+      res[key] = sanitizeForLocalStorage(obj[key]);
+    }
+    return res;
+  }
+  return obj;
+}
+
+function safeSaveLocalStorage(key: string, data: any) {
+  if (typeof window === 'undefined') return;
+  try {
+    const sanitized = sanitizeForLocalStorage(data);
+    localStorage.setItem(key, JSON.stringify(sanitized));
+  } catch {
+    // Safely handle quota exceeded: full uncompressed data is safely stored in IndexedDB
+    try {
+      localStorage.removeItem(key);
+    } catch {}
+  }
 }
 
 export function PgriProvider({ children }: { children: React.ReactNode }) {
@@ -374,18 +414,29 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
     };
   }, [checkSupabaseStatus]);
 
-  // 2. Hydrate from localStorage for instant initial paint
+  // 2. Hydrate from IndexedDB first, with localStorage fallback
   useEffect(() => {
-    const timer = setTimeout(() => {
+    let isCancelled = false;
+
+    const hydrateState = async () => {
       try {
         const savedAuth = localStorage.getItem(AUTH_KEY);
         if (savedAuth === 'true') {
           setIsAdminLoggedIn(true);
         }
 
-        const savedData = localStorage.getItem(STORAGE_KEY);
-        if (savedData) {
-          const parsed = JSON.parse(savedData);
+        // Try IndexedDB first (contains complete full-resolution images)
+        let parsed = await idbGet<any>(STORAGE_KEY);
+
+        // Fallback to localStorage if IndexedDB is empty
+        if (!parsed) {
+          const savedData = localStorage.getItem(STORAGE_KEY);
+          if (savedData) {
+            parsed = JSON.parse(savedData);
+          }
+        }
+
+        if (parsed && !isCancelled) {
           if (parsed.profile) setProfile({ ...initialProfile, ...parsed.profile });
           if (parsed.sejarahList) setSejarahList(deduplicateItems(parsed.sejarahList, 'sej'));
           if (parsed.visiMisi) setVisiMisi(parsed.visiMisi);
@@ -403,13 +454,19 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
           if (parsed.siteSettings) setSiteSettings(parsed.siteSettings);
         }
       } catch (e) {
-        console.error('Error reading localStorage:', e);
+        console.warn('Hydration cache notice:', e);
       } finally {
-        setHydrated(true);
+        if (!isCancelled) {
+          setHydrated(true);
+        }
       }
-    }, 0);
+    };
 
-    return () => clearTimeout(timer);
+    hydrateState();
+
+    return () => {
+      isCancelled = true;
+    };
   }, []);
 
   // 3. Load initial remote data from Supabase pgri_store if available
@@ -505,31 +562,32 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
     }
   }, [profile.faviconUrl, profile.logoUrl, profile.browserTitle]);
 
-  // 6. Cache state to localStorage as fast client fallback
+  // 6. Cache state: IndexedDB for complete data with images, safe sanitized localStorage for fast client fallback
   useEffect(() => {
     if (!hydrated) return;
-    try {
-      const dataToSave = {
-        profile,
-        sejarahList,
-        visiMisi,
-        pengurusList,
-        programKerjaList,
-        kegiatanList,
-        beritaList,
-        prestasiList,
-        galeriList,
-        kalenderList,
-        layananList,
-        pendaftaranList,
-        aspirasiList,
-        socialMedia,
-        siteSettings,
-      };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
-    } catch (e) {
-      console.error('Error saving local cache:', e);
-    }
+    const dataToSave = {
+      profile,
+      sejarahList,
+      visiMisi,
+      pengurusList,
+      programKerjaList,
+      kegiatanList,
+      beritaList,
+      prestasiList,
+      galeriList,
+      kalenderList,
+      layananList,
+      pendaftaranList,
+      aspirasiList,
+      socialMedia,
+      siteSettings,
+    };
+
+    // 1. IndexedDB stores full uncompressed data (photos, images, text) safely with no quota limits
+    idbSet(STORAGE_KEY, dataToSave).catch(() => {});
+
+    // 2. Safe sanitized localStorage for fast instant boot
+    safeSaveLocalStorage(STORAGE_KEY, dataToSave);
   }, [
     hydrated,
     profile,
@@ -550,8 +608,22 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
   ]);
 
   // Admin Auth Actions
+  const getActiveAdminPasswords = useCallback(() => {
+    const list = ['pgri2026', 'admin123', 'pasirwangi'];
+    if (siteSettings.adminPassword) {
+      list.unshift(siteSettings.adminPassword);
+    }
+    try {
+      const localCustom = localStorage.getItem(ADMIN_PASSWORD_KEY);
+      if (localCustom && !list.includes(localCustom)) {
+        list.unshift(localCustom);
+      }
+    } catch {}
+    return list;
+  }, [siteSettings.adminPassword]);
+
   const loginAdmin = (password: string) => {
-    const validPasswords = ['pgri2026', 'admin123', 'pasirwangi'];
+    const validPasswords = getActiveAdminPasswords();
     if (validPasswords.includes(password.trim())) {
       setIsAdminLoggedIn(true);
       try {
@@ -562,6 +634,47 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
     }
     showToast('Kata sandi salah!', 'error');
     return false;
+  };
+
+  const changeAdminPassword = (currentPassword: string, newPassword: string) => {
+    const validPasswords = getActiveAdminPasswords();
+    if (!validPasswords.includes(currentPassword.trim())) {
+      showToast('Kata sandi saat ini tidak cocok!', 'error');
+      return { success: false, message: 'Kata sandi saat ini tidak cocok!' };
+    }
+
+    if (!newPassword || newPassword.trim().length < 6) {
+      showToast('Kata sandi baru minimal harus 6 karakter!', 'warning');
+      return { success: false, message: 'Kata sandi baru minimal 6 karakter!' };
+    }
+
+    const cleanPass = newPassword.trim();
+    // Update siteSettings
+    setSiteSettings((prev) => {
+      const updated = { ...prev, adminPassword: cleanPass };
+      saveItemToSupabase('siteSettings', updated);
+      return updated;
+    });
+
+    try {
+      localStorage.setItem(ADMIN_PASSWORD_KEY, cleanPass);
+    } catch {}
+
+    showToast('Kata sandi admin berhasil diperbarui!', 'success');
+    return { success: true, message: 'Kata sandi admin berhasil diperbarui!' };
+  };
+
+  const resetAdminPassword = () => {
+    setSiteSettings((prev) => {
+      const updated = { ...prev };
+      delete updated.adminPassword;
+      saveItemToSupabase('siteSettings', updated);
+      return updated;
+    });
+    try {
+      localStorage.removeItem(ADMIN_PASSWORD_KEY);
+    } catch {}
+    showToast('Kata sandi admin dikembalikan ke setelan bawaan (pgri2026)', 'info');
   };
 
   const loginAdminWithGoogle = async (): Promise<boolean> => {
@@ -904,14 +1017,19 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
       id: generateUniqueId('ber'),
       slug: `${slug}-${Math.floor(Math.random() * 1000)}`,
       dibacaCount: 0,
+      featured: item.featured ?? false,
     };
     setBeritaList((prev) => {
-      const next = [newItem, ...prev];
+      let list = prev;
+      if (newItem.featured) {
+        list = list.map((b) => ({ ...b, featured: false }));
+      }
+      const next = [newItem, ...list];
       saveItemToSupabase('beritaList', next);
       return next;
     });
     saveBeritaToSupabase(newItem);
-    showToast('Berita berhasil diterbitkan dan disimpan ke Supabase', 'success');
+    showToast(newItem.featured ? 'Berita Utama berhasil diterbitkan & tampil di Hero Landingpage!' : 'Berita berhasil diterbitkan dan disimpan ke Supabase', 'success');
   };
 
   const updateBerita = (id: string, item: Partial<BeritaItem>) => {
@@ -922,12 +1040,19 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
           saveBeritaToSupabase(updated);
           return updated;
         }
+        if (item.featured && b.id !== id) {
+          return { ...b, featured: false };
+        }
         return b;
       });
       saveItemToSupabase('beritaList', next);
       return next;
     });
-    showToast('Berita berhasil diperbarui di Supabase', 'success');
+    showToast(item.featured ? 'Berita Utama berhasil diperbarui & tampil di Hero Landingpage!' : 'Berita berhasil diperbarui di Supabase', 'success');
+  };
+
+  const setBeritaUtama = (id: string) => {
+    updateBerita(id, { featured: true });
   };
 
   const deleteBerita = (id: string) => {
@@ -1344,6 +1469,8 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
         loginAdmin,
         loginAdminWithGoogle,
         logoutAdmin,
+        changeAdminPassword,
+        resetAdminPassword,
         showToast,
         removeToast,
         syncAllToFirestore,
@@ -1366,6 +1493,7 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
         addBerita,
         updateBerita,
         deleteBerita,
+        setBeritaUtama,
         incrementBeritaViews,
         addPrestasi,
         updatePrestasi,

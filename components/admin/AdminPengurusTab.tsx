@@ -24,7 +24,11 @@ import {
   User,
   AlertCircle,
   Link as LinkIcon,
+  Crop,
+  Sliders,
 } from 'lucide-react';
+import { PrecisionPhotoCropModal } from './PrecisionPhotoCropModal';
+import { compressImageFile } from '@/lib/imageCompressor';
 
 export function AdminPengurusTab() {
   const { pengurusList, addPengurus, importPengurusBatch, updatePengurus, deletePengurus, showToast } = usePgriStore();
@@ -54,6 +58,19 @@ export function AdminPengurusTab() {
 
   // Modal State for Deleting Pengurus (Verification Modal)
   const [deleteTarget, setDeleteTarget] = useState<PengurusItem | null>(null);
+
+  // Modal State for Precision Photo Cropping & Framing in Circle
+  const [cropModal, setCropModal] = useState<{
+    isOpen: boolean;
+    imageSrc: string;
+    title: string;
+    onSave: (url: string) => void;
+  }>({
+    isOpen: false,
+    imageSrc: '',
+    title: '',
+    onSave: () => {},
+  });
 
   // Import Excel State
   const [importPreviewData, setImportPreviewData] = useState<
@@ -244,7 +261,7 @@ export function AdminPengurusTab() {
   // ==========================================
   // PHOTO UPLOADER HELPER (FileReader to base64)
   // ==========================================
-  const handlePhotoFileUpload = (
+  const handlePhotoFileUpload = async (
     e: React.ChangeEvent<HTMLInputElement>,
     onSuccess: (dataUrl: string) => void
   ) => {
@@ -256,21 +273,20 @@ export function AdminPengurusTab() {
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      showToast('Ukuran gambar maksimal 5MB', 'error');
+    if (file.size > 10 * 1024 * 1024) {
+      showToast('Ukuran gambar maksimal 10MB', 'error');
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
-      if (dataUrl) {
-        onSuccess(dataUrl);
-        showToast('Foto pengurus berhasil dipilih!', 'success');
-      }
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
+    try {
+      const compressed = await compressImageFile(file, 600, 600, 0.85);
+      onSuccess(compressed);
+      showToast('Foto pengurus berhasil dipilih & dioptimalkan!', 'success');
+    } catch {
+      showToast('Gagal memproses gambar pengurus', 'error');
+    } finally {
+      e.target.value = '';
+    }
   };
 
   // Filtered pengurus list
@@ -405,8 +421,8 @@ export function AdminPengurusTab() {
         <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center pt-1 border-t border-slate-100">
           {/* Photo Input (8 cols) */}
           <div className="sm:col-span-8 flex items-center gap-2.5">
-            {/* Avatar thumbnail preview */}
-            <div className="w-10 h-10 rounded-xl overflow-hidden shrink-0 border border-slate-200 bg-slate-100 relative">
+            {/* Avatar circular preview */}
+            <div className="w-12 h-12 rounded-full overflow-hidden shrink-0 border-2 border-emerald-500/40 ring-2 ring-emerald-50/60 bg-slate-100 relative shadow-2xs">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={newPengurus.fotoUrl || '/images/hero_pgri.jpg'}
@@ -437,9 +453,30 @@ export function AdminPengurusTab() {
               type="button"
               onClick={() => newFotoFileRef.current?.click()}
               className="cursor-pointer px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-semibold text-xs flex items-center gap-1.5 shrink-0 transition-colors border border-slate-200"
+              title="Upload foto dari komputer atau HP"
             >
               <Camera className="h-3.5 w-3.5 text-emerald-700" />
-              <span>Upload Foto</span>
+              <span>Upload</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                setCropModal({
+                  isOpen: true,
+                  imageSrc: newPengurus.fotoUrl || '/images/hero_pgri.jpg',
+                  title: 'Atur Presisi Lingkaran Foto Pengurus',
+                  onSave: (url) => {
+                    setNewPengurus((prev) => ({ ...prev, fotoUrl: url }));
+                    showToast('Foto presisi lingkaran diterapkan!', 'success');
+                  },
+                })
+              }
+              className="cursor-pointer px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-xl font-semibold text-xs flex items-center gap-1.5 shrink-0 transition-colors border border-emerald-200 shadow-2xs"
+              title="Atur posisi zoom & perataan agar pas presisi di dalam bentuk lingkaran"
+            >
+              <Crop className="h-3.5 w-3.5 text-emerald-700" />
+              <span>Atur Presisi Bundar</span>
             </button>
           </div>
 
@@ -521,13 +558,13 @@ export function AdminPengurusTab() {
                 ) : (
                   filteredList.map((p, pIdx) => (
                     <tr key={`${p.id}-${pIdx}`} className="hover:bg-slate-50/80 transition-colors">
-                      {/* Photo Thumbnail */}
+                      {/* Photo Thumbnail (Circular) */}
                       <td className="p-3 text-center">
                         <button
                           type="button"
                           onClick={() => setViewingPengurus(p)}
-                          className="w-10 h-10 rounded-xl overflow-hidden relative border border-slate-200 bg-slate-100 hover:ring-2 hover:ring-emerald-500 transition-all inline-block cursor-pointer shadow-2xs"
-                          title="Klik untuk melihat foto lebih besar & ganti foto"
+                          className="w-12 h-12 rounded-full overflow-hidden relative border-2 border-emerald-500/40 ring-2 ring-emerald-50/60 bg-slate-100 hover:ring-2 hover:ring-emerald-500 transition-all inline-block cursor-pointer shadow-2xs"
+                          title="Klik untuk melihat foto lebih besar & atur presisi lingkaran"
                         >
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
@@ -559,7 +596,7 @@ export function AdminPengurusTab() {
                         </div>
                       </td>
 
-                      {/* ACTIONS: Lihat, Edit, Hapus */}
+                      {/* ACTIONS: Lihat, Presisi, Edit, Hapus */}
                       <td className="p-3 text-right">
                         <div className="flex items-center justify-end gap-1">
                           {/* 1. LIHAT (VIEW) */}
@@ -570,6 +607,26 @@ export function AdminPengurusTab() {
                             title="Lihat Profil & Foto Pengurus"
                           >
                             <Eye className="h-4 w-4" />
+                          </button>
+
+                          {/* 1.5. ATUR PRESISI LINGKARAN */}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setCropModal({
+                                isOpen: true,
+                                imageSrc: p.fotoUrl || '/images/hero_pgri.jpg',
+                                title: `Atur Presisi Foto Bundar: ${p.nama}`,
+                                onSave: (url) => {
+                                  updatePengurus(p.id, { fotoUrl: url });
+                                  showToast(`Presisi foto ${p.nama} berhasil disimpan!`, 'success');
+                                },
+                              })
+                            }
+                            className="p-1.5 text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                            title="Atur Zoom & Posisi Foto Lingkaran"
+                          >
+                            <Crop className="h-4 w-4" />
                           </button>
 
                           {/* 2. EDIT */}
@@ -625,9 +682,9 @@ export function AdminPengurusTab() {
               </button>
             </div>
 
-            {/* Big Photo & Quick Upload Button */}
+            {/* Big Photo (Circular) & Quick Upload / Precision Buttons */}
             <div className="flex flex-col items-center space-y-3">
-              <div className="w-32 h-32 rounded-2xl overflow-hidden border-2 border-emerald-500/30 bg-slate-100 shadow-md relative group">
+              <div className="w-36 h-36 rounded-full overflow-hidden border-4 border-emerald-500/40 ring-4 ring-emerald-100/60 bg-slate-100 shadow-xl relative group">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={viewingPengurus.fotoUrl || '/images/hero_pgri.jpg'}
@@ -635,14 +692,25 @@ export function AdminPengurusTab() {
                   className="w-full h-full object-cover"
                 />
 
-                {/* Hover overlay to change photo */}
+                {/* Hover overlay to change photo or adjust precision */}
                 <button
                   type="button"
-                  onClick={() => viewFotoFileRef.current?.click()}
-                  className="absolute inset-0 bg-slate-900/50 text-white flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer text-[10px] font-semibold gap-1"
+                  onClick={() =>
+                    setCropModal({
+                      isOpen: true,
+                      imageSrc: viewingPengurus.fotoUrl || '/images/hero_pgri.jpg',
+                      title: `Atur Presisi Foto Bundar: ${viewingPengurus.nama}`,
+                      onSave: (url) => {
+                        updatePengurus(viewingPengurus.id, { fotoUrl: url });
+                        setViewingPengurus((prev) => (prev ? { ...prev, fotoUrl: url } : null));
+                        showToast('Presisi foto pengurus berhasil disimpan!', 'success');
+                      },
+                    })
+                  }
+                  className="absolute inset-0 bg-slate-900/60 text-white flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer text-[10px] font-semibold gap-1"
                 >
-                  <Camera className="h-5 w-5" />
-                  <span>Ganti Foto</span>
+                  <Crop className="h-5 w-5 text-emerald-400" />
+                  <span>Atur Presisi Bundar</span>
                 </button>
               </div>
 
@@ -661,14 +729,37 @@ export function AdminPengurusTab() {
                 }
               />
 
-              <button
-                type="button"
-                onClick={() => viewFotoFileRef.current?.click()}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-xl text-xs font-semibold transition-colors cursor-pointer border border-emerald-200"
-              >
-                <Camera className="h-3.5 w-3.5" />
-                <span>Upload / Ganti Foto</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => viewFotoFileRef.current?.click()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-semibold transition-colors cursor-pointer border border-slate-200"
+                >
+                  <Camera className="h-3.5 w-3.5 text-emerald-700" />
+                  <span>Upload Foto</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCropModal({
+                      isOpen: true,
+                      imageSrc: viewingPengurus.fotoUrl || '/images/hero_pgri.jpg',
+                      title: `Atur Presisi Foto Bundar: ${viewingPengurus.nama}`,
+                      onSave: (url) => {
+                        updatePengurus(viewingPengurus.id, { fotoUrl: url });
+                        setViewingPengurus((prev) => (prev ? { ...prev, fotoUrl: url } : null));
+                        showToast('Presisi foto pengurus berhasil disimpan!', 'success');
+                      },
+                    })
+                  }
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-xl text-xs font-semibold transition-colors cursor-pointer border border-emerald-200 shadow-2xs"
+                  title="Atur Zoom & Posisi agar foto pas di lingkaran"
+                >
+                  <Crop className="h-3.5 w-3.5 text-emerald-700" />
+                  <span>Atur Presisi Lingkaran</span>
+                </button>
+              </div>
             </div>
 
             {/* Profile Info Cards */}
@@ -777,9 +868,9 @@ export function AdminPengurusTab() {
               </button>
             </div>
 
-            {/* Photo Section */}
+            {/* Photo Section (Circular & Precision Controls) */}
             <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl flex items-center gap-4">
-              <div className="w-16 h-16 rounded-xl overflow-hidden shrink-0 border border-slate-200 bg-white relative">
+              <div className="w-20 h-20 rounded-full overflow-hidden shrink-0 border-2 border-emerald-500/40 ring-2 ring-emerald-100/60 bg-white relative shadow-xs">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={editingPengurus.fotoUrl || '/images/hero_pgri.jpg'}
@@ -789,9 +880,29 @@ export function AdminPengurusTab() {
               </div>
 
               <div className="flex-1 space-y-2">
-                <span className="text-[11px] font-semibold text-slate-700 block">
-                  Foto Pengurus:
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-slate-700 block">
+                    Foto Pengurus (Format Bundar):
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCropModal({
+                        isOpen: true,
+                        imageSrc: editingPengurus.fotoUrl || '/images/hero_pgri.jpg',
+                        title: `Atur Presisi Foto Bundar: ${editingPengurus.nama}`,
+                        onSave: (url) => {
+                          setEditingPengurus((prev) => (prev ? { ...prev, fotoUrl: url } : null));
+                          showToast('Foto presisi bundar diterapkan ke formulir!', 'success');
+                        },
+                      })
+                    }
+                    className="text-[11px] font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Crop className="w-3.5 h-3.5" />
+                    <span>Atur Presisi Bundar</span>
+                  </button>
+                </div>
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -816,10 +927,30 @@ export function AdminPengurusTab() {
                   <button
                     type="button"
                     onClick={() => editFotoFileRef.current?.click()}
-                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shrink-0 cursor-pointer shadow-2xs"
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shrink-0 cursor-pointer shadow-2xs"
+                    title="Pilih foto baru dari file"
                   >
                     <Upload className="h-3 w-3" />
                     <span>Upload</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCropModal({
+                        isOpen: true,
+                        imageSrc: editingPengurus.fotoUrl || '/images/hero_pgri.jpg',
+                        title: `Atur Presisi Foto Bundar: ${editingPengurus.nama}`,
+                        onSave: (url) => {
+                          setEditingPengurus((prev) => (prev ? { ...prev, fotoUrl: url } : null));
+                          showToast('Foto presisi bundar diterapkan ke formulir!', 'success');
+                        },
+                      })
+                    }
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shrink-0 cursor-pointer shadow-2xs"
+                    title="Atur zoom & geser foto agar pas presisi di dalam lingkaran"
+                  >
+                    <Crop className="h-3 w-3" />
+                    <span>Presisi</span>
                   </button>
                 </div>
               </div>
@@ -1035,6 +1166,15 @@ export function AdminPengurusTab() {
             setDeleteTarget(null);
           }
         }}
+      />
+
+      {/* MODAL 5: PENGATURAN PRESISI FOTO LINGKARAN */}
+      <PrecisionPhotoCropModal
+        isOpen={cropModal.isOpen}
+        imageSrc={cropModal.imageSrc}
+        title={cropModal.title}
+        onClose={() => setCropModal((prev) => ({ ...prev, isOpen: false }))}
+        onSave={cropModal.onSave}
       />
     </div>
   );
