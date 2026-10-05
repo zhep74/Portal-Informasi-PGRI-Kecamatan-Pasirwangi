@@ -24,8 +24,9 @@ import {
 } from 'lucide-react';
 
 export function HeroSection() {
-  const { profile, siteSettings, beritaList, incrementBeritaViews, showToast } = usePgriStore();
+  const { profile, siteSettings, beritaList, anggotaList = [], incrementBeritaViews, showToast } = usePgriStore();
   const [selectedBerita, setSelectedBerita] = useState<BeritaItem | null>(null);
+  const totalAnggota = anggotaList && anggotaList.length > 0 ? anggotaList.length : profile.statistik.jumlahAnggota;
 
   // Active Berita Utama from store
   const beritaUtama = beritaList.find((b) => b.featured) || beritaList[0];
@@ -68,9 +69,9 @@ export function HeroSection() {
           <div className="lg:col-span-7 text-left space-y-6">
             {/* Header Badges: Portal Resmi & Berita Utama Ticker */}
             <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
-              <span className="inline-flex items-center gap-1.5 bg-emerald-600/25 text-emerald-300 border border-emerald-500/40 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider self-start shadow-xs">
-                <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
-                <span>Portal Resmi PGRI Pasirwangi</span>
+              <span className="inline-flex items-center gap-2 bg-slate-900/80 backdrop-blur-md border border-slate-700/80 px-3.5 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider self-start shadow-xs">
+                <span className="inline-block w-2 h-2 rounded-full neon-kilatan-dot shrink-0" />
+                <span className="neon-kilatan-text-dark">Cabang PGRI Kecamatan Pasirwangi</span>
               </span>
 
               {beritaUtama && (
@@ -233,7 +234,7 @@ export function HeroSection() {
                   <div className="flex items-center gap-2">
                     <PgriLogo size={24} className="shrink-0" />
                     <span className="font-semibold text-slate-300">
-                      {profile.statistik.jumlahAnggota}+ Anggota Terdaftar
+                      {totalAnggota.toLocaleString('id-ID')} Anggota Terdaftar
                     </span>
                   </div>
                   <a

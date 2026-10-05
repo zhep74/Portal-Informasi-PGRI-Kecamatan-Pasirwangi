@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
   OrgProfile,
   SejarahItem,
@@ -17,6 +17,7 @@ import {
   AspirasiItem,
   SocialMediaLinks,
   SiteSettings,
+  AnggotaItem,
 } from './types';
 import {
   initialProfile,
@@ -34,6 +35,7 @@ import {
   initialAspirasi,
   initialSocialMedia,
   initialSiteSettings,
+  initialAnggotaList,
 } from './initialData';
 import {
   supabase,
@@ -67,6 +69,9 @@ import {
   deleteAspirasiFromSupabase,
   savePendaftaranToSupabase,
   deletePendaftaranFromSupabase,
+  saveAnggotaToSupabase,
+  deleteAnggotaFromSupabase,
+  saveAnggotaBatchToSupabase,
 } from './supabase';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { idbSet, idbGet, idbDelete } from './idb';
@@ -91,6 +96,7 @@ interface PgriContextType {
   layananList: LayananItem[];
   pendaftaranList: PendaftaranItem[];
   aspirasiList: AspirasiItem[];
+  anggotaList: AnggotaItem[];
   socialMedia: SocialMediaLinks;
   siteSettings: SiteSettings;
   isAdminLoggedIn: boolean;
@@ -200,6 +206,13 @@ interface PgriContextType {
   updateAspirasiStatus: (id: string, status: AspirasiItem['status'], responAdmin?: string) => void;
   deleteAspirasi: (id: string) => void;
 
+  // Daftar Anggota
+  addAnggota: (item: Omit<AnggotaItem, 'id'>) => void;
+  updateAnggota: (id: string, item: Partial<AnggotaItem>) => void;
+  deleteAnggota: (id: string) => void;
+  importAnggotaBatch: (items: Array<Omit<AnggotaItem, 'id'>>) => void;
+  clearAllAnggota: () => void;
+
   // Social & Settings
   updateSocialMedia: (data: Partial<SocialMediaLinks>) => void;
   updateSiteSettings: (data: Partial<SiteSettings>) => void;
@@ -277,6 +290,7 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
   const [layananList, setLayananList] = useState<LayananItem[]>(initialLayanan);
   const [pendaftaranList, setPendaftaranList] = useState<PendaftaranItem[]>(initialPendaftaran);
   const [aspirasiList, setAspirasiList] = useState<AspirasiItem[]>(initialAspirasi);
+  const [anggotaList, setAnggotaList] = useState<AnggotaItem[]>(initialAnggotaList);
   const [socialMedia, setSocialMedia] = useState<SocialMediaLinks>(initialSocialMedia);
   const [siteSettings, setSiteSettings] = useState<SiteSettings>(initialSiteSettings);
 
@@ -450,6 +464,7 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
           if (parsed.layananList) setLayananList(deduplicateItems(parsed.layananList, 'lay'));
           if (parsed.pendaftaranList) setPendaftaranList(deduplicateItems(parsed.pendaftaranList, 'pend'));
           if (parsed.aspirasiList) setAspirasiList(deduplicateItems(parsed.aspirasiList, 'asp'));
+          if (parsed.anggotaList) setAnggotaList(deduplicateItems(parsed.anggotaList, 'agt'));
           if (parsed.socialMedia) setSocialMedia(parsed.socialMedia);
           if (parsed.siteSettings) setSiteSettings(parsed.siteSettings);
         }
@@ -488,6 +503,7 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
           if (remoteData.layananList) setLayananList(deduplicateItems(remoteData.layananList, 'lay'));
           if (remoteData.pendaftaranList) setPendaftaranList(deduplicateItems(remoteData.pendaftaranList, 'pend'));
           if (remoteData.aspirasiList) setAspirasiList(deduplicateItems(remoteData.aspirasiList, 'asp'));
+          if (remoteData.anggotaList) setAnggotaList(deduplicateItems(remoteData.anggotaList, 'agt'));
           if (remoteData.socialMedia) setSocialMedia(remoteData.socialMedia);
           if (remoteData.siteSettings) setSiteSettings(remoteData.siteSettings);
         }
@@ -524,6 +540,7 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
             else if (key === 'layananList') setLayananList(deduplicateItems(data, 'lay'));
             else if (key === 'pendaftaranList') setPendaftaranList(deduplicateItems(data, 'pend'));
             else if (key === 'aspirasiList') setAspirasiList(deduplicateItems(data, 'asp'));
+            else if (key === 'anggotaList') setAnggotaList(deduplicateItems(data, 'agt'));
           }
         }
       )
@@ -562,11 +579,23 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
     }
   }, [profile.faviconUrl, profile.logoUrl, profile.browserTitle]);
 
-  // 6. Cache state: IndexedDB for complete data with images, safe sanitized localStorage for fast client fallback
+  // 6. Keep profile.statistik.jumlahAnggota in sync with real table count purely
+  const effectiveProfile = useMemo(
+    () => ({
+      ...profile,
+      statistik: {
+        ...profile.statistik,
+        jumlahAnggota: anggotaList.length > 0 ? anggotaList.length : profile.statistik.jumlahAnggota,
+      },
+    }),
+    [profile, anggotaList.length]
+  );
+
+  // 7. Cache state: IndexedDB for complete data with images, safe sanitized localStorage for fast client fallback
   useEffect(() => {
     if (!hydrated) return;
     const dataToSave = {
-      profile,
+      profile: effectiveProfile,
       sejarahList,
       visiMisi,
       pengurusList,
@@ -579,6 +608,7 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
       layananList,
       pendaftaranList,
       aspirasiList,
+      anggotaList,
       socialMedia,
       siteSettings,
     };
@@ -590,7 +620,7 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
     safeSaveLocalStorage(STORAGE_KEY, dataToSave);
   }, [
     hydrated,
-    profile,
+    effectiveProfile,
     sejarahList,
     visiMisi,
     pengurusList,
@@ -603,6 +633,7 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
     layananList,
     pendaftaranList,
     aspirasiList,
+    anggotaList,
     socialMedia,
     siteSettings,
   ]);
@@ -1354,6 +1385,87 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
     showToast('Data aspirasi berhasil dihapus dari Supabase', 'info');
   };
 
+  // Daftar Anggota Mutations
+  const addAnggota = (item: Omit<AnggotaItem, 'id'>) => {
+    const newItem: AnggotaItem = {
+      ...item,
+      id: `agt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    setAnggotaList((prev) => {
+      const next = [newItem, ...prev];
+      saveItemToSupabase('anggotaList', next);
+      setProfile((p) => ({
+        ...p,
+        statistik: { ...p.statistik, jumlahAnggota: next.length },
+      }));
+      return next;
+    });
+    saveAnggotaToSupabase(newItem).catch(() => {});
+    showToast(`Anggota ${item.nama} berhasil ditambahkan!`, 'success');
+  };
+
+  const updateAnggota = (id: string, item: Partial<AnggotaItem>) => {
+    setAnggotaList((prev) => {
+      const next = prev.map((a) => {
+        if (a.id === id) {
+          const updated = { ...a, ...item, updatedAt: new Date().toISOString() };
+          saveAnggotaToSupabase(updated).catch(() => {});
+          return updated;
+        }
+        return a;
+      });
+      saveItemToSupabase('anggotaList', next);
+      return next;
+    });
+    showToast('Data anggota berhasil diperbarui!', 'success');
+  };
+
+  const deleteAnggota = (id: string) => {
+    setAnggotaList((prev) => {
+      const next = prev.filter((a) => a.id !== id);
+      saveItemToSupabase('anggotaList', next);
+      setProfile((p) => ({
+        ...p,
+        statistik: { ...p.statistik, jumlahAnggota: next.length },
+      }));
+      return next;
+    });
+    deleteAnggotaFromSupabase(id).catch(() => {});
+    showToast('Data anggota berhasil dihapus!', 'info');
+  };
+
+  const importAnggotaBatch = (items: Array<Omit<AnggotaItem, 'id'>>) => {
+    const newItems: AnggotaItem[] = items.map((item, idx) => ({
+      ...item,
+      id: `agt-imp-${Date.now()}-${idx + 1}-${Math.random().toString(36).substring(2, 5)}`,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }));
+    setAnggotaList((prev) => {
+      const next = [...newItems, ...prev];
+      saveItemToSupabase('anggotaList', next);
+      setProfile((p) => ({
+        ...p,
+        statistik: { ...p.statistik, jumlahAnggota: next.length },
+      }));
+      return next;
+    });
+    saveAnggotaBatchToSupabase(newItems).catch(() => {});
+    showToast(`Berhasil mengimpor ${newItems.length} data anggota!`, 'success');
+  };
+
+  const clearAllAnggota = () => {
+    setAnggotaList([]);
+    saveItemToSupabase('anggotaList', []);
+    setProfile((p) => ({
+      ...p,
+      statistik: { ...p.statistik, jumlahAnggota: 0 },
+    }));
+    showToast('Semua data anggota telah dikosongkan.', 'warning');
+  };
+
   // Social & Settings Mutations
   const updateSocialMedia = (data: Partial<SocialMediaLinks>) => {
     setSocialMedia((prev) => {
@@ -1388,6 +1500,7 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
     setLayananList(initialLayanan);
     setPendaftaranList(initialPendaftaran);
     setAspirasiList(initialAspirasi);
+    setAnggotaList(initialAnggotaList);
     setSocialMedia(initialSocialMedia);
     setSiteSettings(initialSiteSettings);
     try {
@@ -1411,6 +1524,7 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
       layananList,
       pendaftaranList,
       aspirasiList,
+      anggotaList,
       socialMedia,
       siteSettings,
     };
@@ -1433,6 +1547,7 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
       if (data.layananList) setLayananList(data.layananList);
       if (data.pendaftaranList) setPendaftaranList(data.pendaftaranList);
       if (data.aspirasiList) setAspirasiList(data.aspirasiList);
+      if (data.anggotaList) setAnggotaList(data.anggotaList);
       if (data.socialMedia) setSocialMedia(data.socialMedia);
       if (data.siteSettings) setSiteSettings(data.siteSettings);
       showToast('Data cadangan berhasil diimpor ke aplikasi!', 'success');
@@ -1446,7 +1561,7 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
   return (
     <PgriContext.Provider
       value={{
-        profile,
+        profile: effectiveProfile,
         sejarahList,
         visiMisi,
         pengurusList,
@@ -1459,6 +1574,7 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
         layananList,
         pendaftaranList,
         aspirasiList,
+        anggotaList,
         socialMedia,
         siteSettings,
         isAdminLoggedIn,
@@ -1513,6 +1629,11 @@ export function PgriProvider({ children }: { children: React.ReactNode }) {
         submitAspirasi,
         updateAspirasiStatus,
         deleteAspirasi,
+        addAnggota,
+        updateAnggota,
+        deleteAnggota,
+        importAnggotaBatch,
+        clearAllAnggota,
         updateSocialMedia,
         updateSiteSettings,
         resetToDefaults,

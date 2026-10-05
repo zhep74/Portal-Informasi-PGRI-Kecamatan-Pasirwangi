@@ -79,18 +79,19 @@ export function Navbar({ onOpenSearch, onOpenAdmin }: NavbarProps) {
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16 md:h-18">
-            {/* Zone 1: Brand Wordmark */}
+            {/* Zone 1: Brand Wordmark (Cabang PGRI dan Kecamatan Pasirwangi di bawahnya) */}
             <a
               href="#"
-              className="flex items-center gap-2.5 sm:gap-3 group focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 rounded-lg p-1"
+              className="flex items-center gap-2.5 sm:gap-3 group focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 rounded-xl py-1 px-1 shrink-0"
+              title="Cabang PGRI Kecamatan Pasirwangi"
             >
-              <PgriLogo className="h-9 w-9 sm:h-10 sm:w-10 transition-transform duration-200 group-hover:scale-105" size={40} />
+              <PgriLogo className="h-9 w-9 sm:h-10 sm:w-10 transition-transform duration-200 group-hover:scale-105 shrink-0 drop-shadow-xs" size={40} />
               <div className="flex flex-col text-left">
-                <span className="text-sm sm:text-base font-extrabold text-slate-900 tracking-tight leading-tight group-hover:text-emerald-700 transition-colors">
-                  PGRI Pasirwangi
+                <span className="neon-kilatan-text text-sm sm:text-base md:text-lg font-black tracking-tight leading-tight">
+                  Cabang PGRI
                 </span>
-                <span className="text-[10px] sm:text-[11px] font-medium text-slate-500 tracking-wider uppercase">
-                  Cabang Pasirwangi Garut
+                <span className="neon-kilatan-text text-xs sm:text-sm md:text-[15px] font-bold tracking-tight leading-tight -mt-0.5">
+                  Kecamatan Pasirwangi
                 </span>
               </div>
             </a>
@@ -214,6 +215,19 @@ export function Navbar({ onOpenSearch, onOpenAdmin }: NavbarProps) {
         {/* Mobile Navigation Drawer */}
         {mobileMenuOpen && (
           <div className="lg:hidden border-t border-slate-200 bg-white/98 backdrop-blur-md px-4 pt-3 pb-6 space-y-1 shadow-2xl max-h-[82vh] overflow-y-auto">
+            {/* Branded Mobile Header with Neon Kilatan */}
+            <div className="flex items-center gap-2.5 p-3 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900 to-slate-950 text-white shadow-sm mb-3 border border-slate-800">
+              <PgriLogo className="h-8 w-8 shrink-0" size={32} />
+              <div className="flex flex-col text-left">
+                <span className="neon-kilatan-text-dark text-xs sm:text-sm font-black tracking-tight leading-tight">
+                  Cabang PGRI
+                </span>
+                <span className="neon-kilatan-text-dark text-[11px] sm:text-xs font-bold tracking-tight leading-tight -mt-0.5">
+                  Kecamatan Pasirwangi
+                </span>
+              </div>
+            </div>
+
             <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 px-3 py-1">
               Menu Utama
             </div>

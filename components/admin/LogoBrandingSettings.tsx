@@ -275,21 +275,21 @@ export function LogoBrandingSettings() {
                   <div className="h-10 w-10 flex items-center justify-center shrink-0">
                     <PgriLogo className="h-10 w-10 drop-shadow-sm" size={40} />
                   </div>
-                  <div>
-                    <div
-                      className={`text-xs font-extrabold tracking-tight leading-tight ${
-                        previewTheme === 'light' ? 'text-slate-900' : 'text-white'
+                  <div className="flex flex-col text-left">
+                    <span
+                      className={`text-xs font-black tracking-tight leading-tight ${
+                        previewTheme === 'light' ? 'neon-kilatan-text' : 'neon-kilatan-text-dark'
                       }`}
                     >
-                      {profile.nama || 'PGRI Pasirwangi'}
-                    </div>
-                    <div
-                      className={`text-[9px] font-medium uppercase tracking-wider ${
-                        previewTheme === 'light' ? 'text-slate-500' : 'text-emerald-400'
+                      Cabang PGRI
+                    </span>
+                    <span
+                      className={`text-[10px] font-bold tracking-tight leading-tight -mt-0.5 ${
+                        previewTheme === 'light' ? 'neon-kilatan-text' : 'neon-kilatan-text-dark'
                       }`}
                     >
-                      {profile.tingkat || 'Cabang Pasirwangi Garut'}
-                    </div>
+                      Kecamatan Pasirwangi
+                    </span>
                   </div>
                 </div>
 

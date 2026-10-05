@@ -15,6 +15,7 @@ import {
   AspirasiItem,
   SocialMediaLinks,
   SiteSettings,
+  AnggotaItem,
 } from './types';
 
 export const SUPABASE_URL =
@@ -239,6 +240,30 @@ create table if not exists public.pgri_store (
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
+-- 15. TABEL DAFTAR ANGGOTA (SIM PGRI Pasirwangi)
+create table if not exists public.pgri_anggota (
+  id text primary key,
+  nama text not null,
+  npa text not null,
+  nik text not null,
+  tempat_lahir text not null,
+  tanggal_lahir text not null,
+  foto text default '',
+  no_telepon text not null,
+  unit_kerja text default '',
+  ranting text default '',
+  status_keanggotaan text default 'Aktif',
+  jenis_kelamin text default 'Laki-laki',
+  email text default '',
+  alamat text default '',
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+create index if not exists idx_pgri_anggota_npa on public.pgri_anggota(npa);
+create index if not exists idx_pgri_anggota_nik on public.pgri_anggota(nik);
+create index if not exists idx_pgri_anggota_nama on public.pgri_anggota(nama);
+
 -- ====================================================================
 -- AKTIFKAN ROW LEVEL SECURITY (RLS) & KEBIJAKAN AKSES
 -- ====================================================================
@@ -257,6 +282,7 @@ alter table public.pgri_layanan enable row level security;
 alter table public.pgri_aspirasi enable row level security;
 alter table public.pgri_pendaftaran enable row level security;
 alter table public.pgri_store enable row level security;
+alter table public.pgri_anggota enable row level security;
 
 -- HAPUS KEBIJAKAN SEBELUMNYA AGAR DAPAT DI-RUN ULANG DENGAN AMAN
 drop policy if exists "policy_profil_select" on public.pgri_profil;
@@ -287,6 +313,8 @@ drop policy if exists "policy_pendaftaran_select" on public.pgri_pendaftaran;
 drop policy if exists "policy_pendaftaran_all" on public.pgri_pendaftaran;
 drop policy if exists "policy_store_select" on public.pgri_store;
 drop policy if exists "policy_store_all" on public.pgri_store;
+drop policy if exists "policy_anggota_select" on public.pgri_anggota;
+drop policy if exists "policy_anggota_all" on public.pgri_anggota;
 
 -- BUAT KEBIJAKAN IZIN BACA PUBLIK
 create policy "policy_profil_select" on public.pgri_profil for select using (true);
@@ -331,6 +359,9 @@ create policy "policy_pendaftaran_all" on public.pgri_pendaftaran for all using 
 create policy "policy_store_select" on public.pgri_store for select using (true);
 create policy "policy_store_all" on public.pgri_store for all using (true) with check (true);
 
+create policy "policy_anggota_select" on public.pgri_anggota for select using (true);
+create policy "policy_anggota_all" on public.pgri_anggota for all using (true) with check (true);
+
 -- AKTIFKAN REPLIKASI REALTIME SUPABASE UNTUK SELURUH TABEL
 -- Menggunakan SET TABLE agar aman dieksekusi berkali-kali tanpa error
 alter publication supabase_realtime set table 
@@ -347,7 +378,63 @@ alter publication supabase_realtime set table
   public.pgri_layanan,
   public.pgri_aspirasi,
   public.pgri_pendaftaran,
-  public.pgri_store;
+  public.pgri_store,
+  public.pgri_anggota;
+`;
+
+export const SUPABASE_ANGGOTA_SQL = `-- ====================================================================
+-- SKRIP TABEL DAFTAR ANGGOTA PGRI CABANG KECAMATAN PASIRWANGI
+-- Salin dan jalankan di SQL Editor Supabase:
+-- https://supabase.com/dashboard/project/vokxvtbijnubrzbdazxs/sql/new
+-- ====================================================================
+
+-- 1. Buat Tabel Anggota PGRI
+create table if not exists public.pgri_anggota (
+  id text primary key,
+  nama text not null,
+  npa text not null,
+  nik text not null,
+  tempat_lahir text not null,
+  tanggal_lahir text not null,
+  foto text default '',
+  no_telepon text not null,
+  unit_kerja text default '',
+  ranting text default '',
+  status_keanggotaan text default 'Aktif',
+  jenis_kelamin text default 'Laki-laki',
+  email text default '',
+  alamat text default '',
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- 2. Buat Index Pencarian Cepat
+create index if not exists idx_pgri_anggota_npa on public.pgri_anggota(npa);
+create index if not exists idx_pgri_anggota_nik on public.pgri_anggota(nik);
+create index if not exists idx_pgri_anggota_nama on public.pgri_anggota(nama);
+
+-- 3. Aktifkan Keamanan Row Level Security (RLS)
+alter table public.pgri_anggota enable row level security;
+
+-- 4. Buat Kebijakan Akses (RLS Policies)
+drop policy if exists "policy_anggota_select" on public.pgri_anggota;
+drop policy if exists "policy_anggota_all" on public.pgri_anggota;
+
+create policy "policy_anggota_select" on public.pgri_anggota for select using (true);
+create policy "policy_anggota_all" on public.pgri_anggota for all using (true) with check (true);
+
+-- 5. Tambahkan ke Realtime Publication Supabase secara Aman (Idempoten)
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables 
+    where pubname = 'supabase_realtime' 
+    and schemaname = 'public' 
+    and tablename = 'pgri_anggota'
+  ) then
+    alter publication supabase_realtime add table public.pgri_anggota;
+  end if;
+end $$;
 `;
 
 export async function testSupabaseConnection(): Promise<{
@@ -836,6 +923,67 @@ export async function saveItemToSupabase(key: string, data: any): Promise<boolea
       data,
       updated_at: new Date().toISOString(),
     });
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+// 15. Daftar Anggota
+export async function saveAnggotaToSupabase(item: AnggotaItem): Promise<boolean> {
+  try {
+    const { error } = await supabase.from('pgri_anggota').upsert({
+      id: item.id,
+      nama: item.nama,
+      npa: item.npa,
+      nik: item.nik,
+      tempat_lahir: item.tempatLahir,
+      tanggal_lahir: item.tanggalLahir,
+      foto: item.foto || '',
+      no_telepon: item.noTelepon,
+      unit_kerja: item.unitKerja || '',
+      ranting: item.ranting || '',
+      status_keanggotaan: item.statusKeanggotaan || 'Aktif',
+      jenis_kelamin: item.jenisKelamin || 'Laki-laki',
+      email: item.email || '',
+      alamat: item.alamat || '',
+      updated_at: new Date().toISOString(),
+    });
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+export async function deleteAnggotaFromSupabase(id: string): Promise<boolean> {
+  try {
+    const { error } = await supabase.from('pgri_anggota').delete().eq('id', id);
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+export async function saveAnggotaBatchToSupabase(items: AnggotaItem[]): Promise<boolean> {
+  try {
+    const rows = items.map((item) => ({
+      id: item.id,
+      nama: item.nama,
+      npa: item.npa,
+      nik: item.nik,
+      tempat_lahir: item.tempatLahir,
+      tanggal_lahir: item.tanggalLahir,
+      foto: item.foto || '',
+      no_telepon: item.noTelepon,
+      unit_kerja: item.unitKerja || '',
+      ranting: item.ranting || '',
+      status_keanggotaan: item.statusKeanggotaan || 'Aktif',
+      jenis_kelamin: item.jenisKelamin || 'Laki-laki',
+      email: item.email || '',
+      alamat: item.alamat || '',
+      updated_at: new Date().toISOString(),
+    }));
+    const { error } = await supabase.from('pgri_anggota').upsert(rows);
     return !error;
   } catch {
     return false;

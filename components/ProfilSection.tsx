@@ -17,7 +17,8 @@ import {
 } from 'lucide-react';
 
 export function ProfilSection() {
-  const { profile } = usePgriStore();
+  const { profile, anggotaList } = usePgriStore();
+  const totalAnggota = anggotaList && anggotaList.length > 0 ? anggotaList.length : profile.statistik.jumlahAnggota;
 
   return (
     <section id="profil" className="py-16 md:py-24 bg-white scroll-mt-16">
@@ -43,12 +44,15 @@ export function ProfilSection() {
               <Users className="h-6 w-6" />
             </div>
             <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 tabular-nums">
-              {profile.statistik.jumlahAnggota}+
+              {totalAnggota.toLocaleString('id-ID')}
             </div>
             <div className="text-xs sm:text-sm font-medium text-slate-600 mt-1">
-              Jumlah Anggota Aktif
+              Jumlah Anggota Terdaftar
             </div>
-            <div className="text-[11px] text-slate-400 mt-0.5">PNS, PPPK, & Non-ASN</div>
+            <div className="text-[11px] text-emerald-600 font-semibold mt-0.5 flex items-center justify-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>Tabel Anggota ({anggotaList.length})</span>
+            </div>
           </div>
 
           <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-5 sm:p-6 text-center hover:border-sky-300 transition-all shadow-sm">

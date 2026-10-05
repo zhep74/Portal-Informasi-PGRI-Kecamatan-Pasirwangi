@@ -211,3 +211,23 @@ export interface SiteSettings {
     total: number;
   };
 }
+
+export interface AnggotaItem {
+  id: string;
+  nama: string;
+  npa: string; // Nomor Pokok Anggota PGRI
+  nik: string; // NIK KTP (16 digit)
+  tempatLahir: string;
+  tanggalLahir: string; // YYYY-MM-DD
+  foto: string; // URL / Base64 foto anggota
+  noTelepon: string; // Nomor Telepon / WhatsApp
+  unitKerja?: string; // Instansi / Sekolah tempat mengajar
+  ranting?: string; // Ranting PGRI (misal: Ranting Pasirwangi, Ranting Barusari, dsb.)
+  statusKeanggotaan?: 'Aktif' | 'Cuti' | 'Pensiun' | 'Mutasi';
+  jenisKelamin?: 'Laki-laki' | 'Perempuan';
+  email?: string;
+  alamat?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+

@@ -49,11 +49,12 @@ export function Footer({ onOpenAdmin }: FooterProps) {
             <div className="flex items-center gap-3">
               <PgriLogo className="h-10 w-10 shrink-0" size={42} />
               <div>
-                <h3 className="text-base font-extrabold text-white tracking-tight">
-                  PGRI Cabang Kecamatan Pasirwangi
+                <h3 className="neon-kilatan-text-dark text-base sm:text-lg font-black tracking-tight">
+                  Cabang PGRI Kecamatan Pasirwangi
                 </h3>
-                <p className="text-xs text-emerald-400 font-medium">
-                  Kabupaten Garut, Jawa Barat
+                <p className="text-xs text-slate-400 font-medium flex items-center gap-1.5 mt-0.5">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full neon-kilatan-dot shrink-0" />
+                  <span>Kabupaten Garut, Jawa Barat</span>
                 </p>
               </div>
             </div>

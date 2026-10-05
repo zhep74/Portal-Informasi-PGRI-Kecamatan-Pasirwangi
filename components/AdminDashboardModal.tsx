@@ -39,10 +39,12 @@ import {
   Copy,
   ExternalLink,
   KeyRound,
+  Users,
 } from 'lucide-react';
 import { SUPABASE_COMPLETE_SQL, SUPABASE_URL } from '@/lib/supabase';
 import { KetuaFotoUploader } from './admin/KetuaFotoUploader';
 import { LogoBrandingSettings } from './admin/LogoBrandingSettings';
+import { AdminAnggotaTab } from './admin/AdminAnggotaTab';
 import { AdminPengurusTab } from './admin/AdminPengurusTab';
 import { AdminSejarahTab } from './admin/AdminSejarahTab';
 import { AdminVisiMisiTab } from './admin/AdminVisiMisiTab';
@@ -105,6 +107,7 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
     aspirasiList,
     updateAspirasiStatus,
     deleteAspirasi,
+    anggotaList = [],
     socialMedia,
     updateSocialMedia,
     siteSettings,
@@ -234,6 +237,7 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
 
   const navMenuItems = [
     { key: 'overview', label: 'Ringkasan', icon: LayoutDashboard },
+    { key: 'anggota', label: 'Daftar Anggota', icon: Users, badge: (anggotaList || []).length },
     { key: 'profil', label: 'Kelola Profil & Statistik', icon: Building },
     { key: 'sejarah', label: 'Kelola Sejarah', icon: History },
     { key: 'visi-misi', label: 'Kelola Visi & Misi', icon: Compass },
@@ -263,8 +267,9 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
               <Shield className="h-4 w-4 text-white" />
             </div>
             <div>
-              <h2 className="text-sm sm:text-base font-bold text-white tracking-tight">
-                Dashboard Pengurus PGRI Pasirwangi
+              <h2 className="text-sm sm:text-base font-bold text-white tracking-tight flex items-center gap-1.5 flex-wrap">
+                <span>Dashboard</span>
+                <span className="neon-kilatan-text-dark">Cabang PGRI Kecamatan Pasirwangi</span>
               </h2>
               <p className="text-[11px] text-slate-400">
                 Sistem Manajemen Informasi & Pelayanan Digital
@@ -444,10 +449,18 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
                   </div>
 
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                    <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-100">
-                      <div className="text-xs text-emerald-600 font-semibold">Total Anggota</div>
+                    <div
+                      onClick={() => setActiveTab('anggota')}
+                      className="p-4 rounded-2xl bg-emerald-50 border border-emerald-100 hover:border-emerald-300 hover:shadow-xs transition-all cursor-pointer group"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="text-xs text-emerald-600 font-semibold">Total Anggota</div>
+                        <span className="text-[10px] text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded font-medium group-hover:bg-emerald-200">
+                          Buka Tabel &rarr;
+                        </span>
+                      </div>
                       <div className="text-2xl font-bold text-slate-900 mt-1">
-                        {profile.statistik.jumlahAnggota}
+                        {anggotaList.length > 0 ? anggotaList.length : profile.statistik.jumlahAnggota}
                       </div>
                     </div>
                     <div className="p-4 rounded-2xl bg-sky-50 border border-sky-100">
@@ -762,6 +775,9 @@ export function AdminDashboardModal({ isOpen, onClose }: AdminDashboardModalProp
                   </div>
                 </div>
               )}
+
+              {/* Tab: Daftar Anggota */}
+              {activeTab === 'anggota' && <AdminAnggotaTab />}
 
               {/* Tab: Sejarah */}
               {activeTab === 'sejarah' && <AdminSejarahTab />}
